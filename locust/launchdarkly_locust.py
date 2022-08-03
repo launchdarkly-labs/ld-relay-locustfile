@@ -2,7 +2,7 @@ import os
 import inspect
 import copy
 
-from locust import Locust
+from locust import HttpUser
 
 from ldclient import LDClient, Config
 from ldclient_mobile import MobileLDClient, MobileConfig
@@ -11,8 +11,7 @@ from locust_event_dispatcher import LocustEventDispatcher
 from locust_feature_requester import FeatureRequesterImpl as LocustServerFeatureRequester
 from locust_streaming import StreamingUpdateProcessor as LocustStreamingProcessor
 
-
-class LaunchDarklyLocust(Locust):
+class LaunchDarklyLocust(HttpUser):
     sdk_key = os.environ.get('LAUNCHDARKLY_SDK_KEY')
     default_user = {"anonymous": True, "key": "anonymous"}
     config_class = Config
@@ -20,12 +19,12 @@ class LaunchDarklyLocust(Locust):
     base_uri = os.environ.get('LAUNCHDARKLY_BASE_URI')
     events_uri = os.environ.get('LAUNCHDARKLY_EVENTS_URI')
     stream_uri = os.environ.get('LAUNCHDARKLY_STREAM_URI')
-    event_processor_class = LocustEventDispatcher
-    feature_requester_class = LocustServerFeatureRequester
-    update_processor_class = LocustStreamingProcessor
 
     def __init__(self, *args, **kwargs):
         super(LaunchDarklyLocust, self).__init__(*args, **kwargs)
+        self.update_processor_class = lambda config, store, ready: LocustStreamingProcessor(self.environment, config, store, ready)
+        self.event_processor_class = lambda config, http=None, dispatcher_class=None: LocustEventDispatcher(self.environment, config, http, dispatcher_class)
+        self.feature_requester_class = lambda config: LocustServerFeatureRequester(self.environment, config)
         self._ldclient = None
         self._user = None
         if self.base_uri is None:
@@ -91,4 +90,4 @@ class LaunchDarklyMobileLocust(LaunchDarklyLocust):
     def make_client(self, user=None):
         if user is None:
           user = self.user
-        return self.client_class(user, config=self.make_config())
+        return self.client_class(self.parent.environment, user, config=self.make_config())

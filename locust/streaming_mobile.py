@@ -16,7 +16,7 @@ from ldclient.interfaces import UpdateProcessor
 from sse_client import SSEClient
 from ldclient.util import _stream_headers, log, UnsuccessfulResponseException, http_error_message, is_http_error_recoverable
 from ldclient.versioned_data_kind import FEATURES, SEGMENTS
-from locust.events import request_success, request_failure
+from locust.event import Events
 
 # allows for up to 5 minutes to elapse without any data sent across the stream. The heartbeats sent as comments on the
 # stream will keep this from triggering
@@ -26,12 +26,12 @@ STREAM_PATH= '/meval'
 
 ParsedPath = namedtuple('ParsedPath', ['kind', 'key'])
 
-
 class MobileStreamingUpdateProcessor(Thread, UpdateProcessor):
-    def __init__(self, config, requester, store, ready):
+    def __init__(self, environment, config, requester, store, ready):
         Thread.__init__(self)
         self.daemon = True
         self._uri = config.stream_base_uri + STREAM_PATH + '/' + config.user_b64
+        self._environment = environment
         self._config = config
         self._requester = requester
         self._store = store
@@ -58,23 +58,23 @@ class MobileStreamingUpdateProcessor(Thread, UpdateProcessor):
                 for msg in messages:
                     if not self._running:
                         break
-                    message_ok = self.process_message(self._store, self._requester, msg)
+                    message_ok = self.process_message(self._environment, self._store, self._requester, msg)
                     if message_ok is True and self._ready.is_set() is False:
                         log.info("MobileStreamingUpdateProcessor initialized ok.")
                         init_duration = int((time.time() - init_start) * 1000)
-                        request_success.fire(request_type="ld:init", name="mobile", response_time=init_duration, response_length=0)
+                        self._environment.events.request.fire(request_type="ld:init", name="mobile", response_time=init_duration, response_length=0, exception=None, context=None)
                         self._ready.set()
             except UnsuccessfulResponseException as e:
                 log.error(http_error_message(e.status, "stream connection"))
                 init_duration = int((time.time() - init_start) * 1000)
-                request_failure.fire(request_type="ld:init", name="mobile", response_time=init_duration, response_length=0, exception=e)
+                self._environment.events.request.fire(request_type="ld:init", name="mobile", response_time=init_duration, response_length=0, exception=e, context=None)
                 if not is_http_error_recoverable(e.status):
                     self._ready.set()  # if client is initializing, make it stop waiting; has no effect if already inited
                     self.stop()
                     break
             except Exception as e:
                 init_duration = int((time.time() - init_start) * 1000)
-                request_failure.fire(request_type="ld:init", name="mobile", response_time=init_duration, response_length=0, exception=e)
+                self._environment.events.request.fire(request_type="ld:init", name="mobile", response_time=init_duration, response_length=0, exception=e, context=None)
                 log.warning("Caught exception. Restarting stream connection after one second. %s" % e)
                 # no stacktrace here because, for a typical connection error, it'll just be a lengthy tour of urllib3 internals
             time.sleep(1)
@@ -109,7 +109,7 @@ class MobileStreamingUpdateProcessor(Thread, UpdateProcessor):
 
     # Returns True if we initialized the feature store
     @staticmethod
-    def process_message(store, requester, msg):
+    def process_message(environment, store, requester, msg):
         if msg.event == 'put':
             all_data = json.loads(msg.data)
 
@@ -129,8 +129,8 @@ class MobileStreamingUpdateProcessor(Thread, UpdateProcessor):
             if payload.get('key') == 'locust-heartbeat':
                 value = int(payload.get('value') or 0)
                 duration = int((recv_time - value))
-                request_success.fire(request_type='sse:flag-update', name='/meval', response_time=duration, response_length=0)
-                
+                environment.events.request.fire(request_type='sse:flag-update', name='/meval', response_time=duration, response_length=0, exception=None, context=None)
+
             log.debug("Received patch event for %s, New version: [%d]", payload.get('key'), payload.get("version"))
             store.upsert(FEATURES, payload)
         elif msg.event == 'ping':

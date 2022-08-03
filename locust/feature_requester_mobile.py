@@ -10,7 +10,6 @@ import urllib3
 from ldclient.interfaces import FeatureRequester
 from ldclient.util import UnsuccessfulResponseException
 from util import _headers, create_http_pool_manager
-#from ldclient.util import create_http_pool_manager
 from ldclient.util import log
 from ldclient.util import throw_if_unsuccessful_response
 from ldclient.versioned_data_kind import FEATURES, SEGMENTS
@@ -22,14 +21,13 @@ EVALX_REPORT = '/msdk/evalx/user'
 
 CacheEntry = namedtuple('CacheEntry', ['data', 'etag'])
 
-
 class FeatureRequesterImpl(FeatureRequester):
-    def __init__(self, config):
+    def __init__(self, environment, config):
         self._cache = dict()
-        self._http = create_http_pool_manager(num_pools=1, verify_ssl=config.verify_ssl,
+        self._http = create_http_pool_manager(environment, num_pools=1, verify_ssl=config.verify_ssl,
             target_base_uri=config.base_uri, force_proxy=config.http_proxy)
         self._config = config
- 
+
     def get_all_data(self):
         all_data = self._do_request(self._config.base_uri, True)
         for k,v in all_data.items():

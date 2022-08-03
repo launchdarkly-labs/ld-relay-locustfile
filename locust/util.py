@@ -1,6 +1,6 @@
 from ldclient.version import VERSION
 from ldclient.util import _get_proxy_url, certifi, throw_if_unsuccessful_response, UnsuccessfulResponseException
-from locust.events import request_success, request_failure
+from locust.event import Events
 import urllib3
 import time
 try:
@@ -22,11 +22,11 @@ def clean_name(method, url):
     x = x._replace(path=newpath)
     return urlunparse(x)
   return url
-  
-      
-  
+
 class LocustProxyPoolManager(urllib3.ProxyManager):
     def __init__(self, *args, **kwargs):
+      self._environment = kwargs['environment']
+      del kwargs['environment']
       super(LocustProxyPoolManager, self).__init__(*args, **kwargs)
 
     def urlopen(self, method, url, redirect=True, **kw):
@@ -49,16 +49,18 @@ class LocustProxyPoolManager(urllib3.ProxyManager):
             content_len = len(resp.data or b"")
           throw_if_unsuccessful_response(resp)
         except UnsuccessfulResponseException as e:
-          request_failure.fire(request_type=req_type, name=name, exception=e, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ))
+          self._environment.events.request.fire(request_type=req_type, name=name, exception=e, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ), context=None)
           return resp
         except Exception as e:
-          request_failure.fire(request_type=req_type, name=name, exception=e, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ))
+          self._environment.events.request.fire(request_type=req_type, name=name, exception=e, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ), context=None)
           raise e
-        request_success.fire(request_type=req_type, name=name, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ))
+        self._environment.events.request.fire(request_type=req_type, name=name, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ), exception=None, context=None)
         return resp
 
 class LocustPoolManager(urllib3.PoolManager):
     def __init__(self, *args, **kwargs):
+      self._environment = kwargs['environment']
+      del kwargs['environment']
       super(LocustPoolManager, self).__init__(*args, **kwargs)
 
     def urlopen(self, method, url, redirect=True, **kw):
@@ -90,33 +92,36 @@ class LocustPoolManager(urllib3.PoolManager):
             content_len = len(resp.data or b"")
           throw_if_unsuccessful_response(resp)
         except UnsuccessfulResponseException as e:
-          request_failure.fire(request_type=req_type, name=name, exception=e, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ))
+          self._environment.events.request.fire(request_type=req_type, name=name, exception=e, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ), context=None)
           return resp
         except Exception as e:
-          request_failure.fire(request_type=req_type, name=name, exception=e, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ))
+          self._environment.events.request.fire(request_type=req_type, name=name, exception=e, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ), context=None)
           raise e
-        request_success.fire(request_type=req_type, name=name, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ))
+
+        self._environment.events.request.fire(request_type=req_type, name=name, response_length=content_len, response_time=int( (time.time() - start_time) * 1000 ), exception=None, context=None)
         return resp
 
-def create_http_pool_manager(num_pools=1, verify_ssl=False, target_base_uri=None, force_proxy=None):
+def create_http_pool_manager(environment, num_pools=1, verify_ssl=False, target_base_uri=None, force_proxy=None):
     proxy_url = force_proxy or _get_proxy_url(target_base_uri)
 
     if not verify_ssl:
         if proxy_url is None:
-            return LocustPoolManager(num_pools=num_pools)
+            return LocustPoolManager(num_pools=num_pools, environment=environment)
         else:
-            return LocustProxyPoolManager(proxy_url, num_pools=num_pools)
-    
+            return LocustProxyPoolManager(proxy_url, num_pools=num_pools, environment=environment)
+
     if proxy_url is None:
         return LocustPoolManager(
             num_pools=num_pools,
             cert_reqs='CERT_REQUIRED',
-            ca_certs=certifi.where()
+            ca_certs=certifi.where(),
+            environment=environment,
             )
     else:
         return LocustProxyPoolManager(
             proxy_url,
             num_pools=num_pools,
             cert_reqs='CERT_REQUIRED',
-            ca_certs=certifi.where()
+            ca_certs=certifi.where(),
+            environment=environment,
         )

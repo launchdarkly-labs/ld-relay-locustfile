@@ -1,36 +1,31 @@
 ![screenshot](screenshot.png)
 
-
 # LD-Relay Locust File
 
-
 This is a locust file meant to emulate the load of launchdarkly server and mobile clients.
-
 
 # Setup
 
 ## Prerequisites
 
-If you are running the testing infrastructure outside of Docker you will need to install the dependencies. This project utilizes `Python 3`, and `Locust 0.13.5`. You can install the required version of Locust with:
+If you are running the testing infrastructure outside of Docker you will need to install the dependencies. This project utilizes `Python 3`, and `Locust 2.10.1`. You can install the required version of Locust with:
 
 ```
-pip3 install locustio==0.13.5
+pip install locust==2.10.1
 ```
 
 As with many Python projects you will also need to install the dependencies listed in `requirements.txt`. Enter the `locust` directory and run:
 
 ```
-pip3 install -r requirements.txt
+pip install -r requirements.txt
 ```
-
 
 ## Optional: Configure a flag heartbeat
 
 This will allow you gather metrics on how long it takes for a flag to propogate to clients. If you do not follow these steps, you will not get these metrics in Locust but the tests will still run.
 
 - Create a flag with the key `locust-heartbeat` with the type number with two variations
-- Create an api key that can modify this flag (see the example token policy below)
-
+- Create an API key that can modify this flag (see the example token policy below)
 
 ## Modify locustfile.py
 
@@ -70,10 +65,9 @@ class MyLocust(LaunchDarklyMobileLocust):
   sdk_key=os.environ.get('SOME_OTHER_ENV')
 ```
 
-
 ## Running the tests
 
-- Run locust with `python3 -m locust -f locustfile.py`
+- Run locust with `python -m locust -f locustfile.py`
 - Open `https://localhost:8089` and enter your desired users and set the host to your instance of LD-Relay
 
 ## Running in Docker

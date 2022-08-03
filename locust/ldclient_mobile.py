@@ -59,12 +59,14 @@ class _FeatureStoreClientWrapper(FeatureStore):
         return self.store.initialized
 
 class MobileLDClient(LDClient):
-  def __init__(self, user, sdk_key=None, config=None, start_wait=5):
+  def __init__(self, environment, user, sdk_key=None, config=None, start_wait=5):
         """Constructs a new LDClient instance.
         :param string sdk_key: the SDK key for your LaunchDarkly environment
         :param ldclient.config.Config config: optional custom configuration
         :param float start_wait: the number of seconds to wait for a successful connection to LaunchDarkly
         """
+
+        self._environment = environment
 
         if user is None:
           raise Exception("user is required for mobile sdk")
@@ -126,15 +128,16 @@ class MobileLDClient(LDClient):
       if config.feature_requester_class:
           feature_requester = config.feature_requester_class(config)
       else:
-          feature_requester = FeatureRequesterImpl(config)
+          feature_requester = FeatureRequesterImpl(self._environment, config)
       """ :type: FeatureRequester """
 
       if config.stream:
-          return StreamingUpdateProcessor(config, feature_requester, store, ready)
+          return StreamingUpdateProcessor(self._environment, config, feature_requester, store, ready)
 
       log.info("Disabling streaming API")
       log.warning("You should only disable the streaming API if instructed to do so by LaunchDarkly support")
       return PollingUpdateProcessor(config, feature_requester, store, ready)
+
   def track(self, event_name, data=None, metric_value=None):
         """Tracks that a user performed an event.
         LaunchDarkly automatically tracks pageviews and clicks that are specified in the Goals

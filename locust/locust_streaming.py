@@ -17,7 +17,7 @@ from sse_client import SSEClient
 from ldclient.util import _stream_headers, log, UnsuccessfulResponseException, http_error_message, is_http_error_recoverable
 from ldclient.versioned_data_kind import FEATURES, SEGMENTS
 from locust_feature_requester import FeatureRequesterImpl
-from locust.events import request_success, request_failure
+from locust.event import Events
 
 # allows for up to 5 minutes to elapse without any data sent across the stream. The heartbeats sent as comments on the
 # stream will keep this from triggering
@@ -27,14 +27,14 @@ STREAM_ALL_PATH = '/all'
 
 ParsedPath = namedtuple('ParsedPath', ['kind', 'key'])
 
-
 class StreamingUpdateProcessor(Thread, UpdateProcessor):
-    def __init__(self, config, store, ready):
+    def __init__(self, environment, config, store, ready):
         Thread.__init__(self)
         self.daemon = True
         self._uri = config.stream_base_uri + STREAM_ALL_PATH
+        self._environment = environment
         self._config = config
-        self._requester = FeatureRequesterImpl(config)
+        self._requester = FeatureRequesterImpl(environment, config)
         self._store = store
         self._running = False
         self._ready = ready
@@ -59,23 +59,23 @@ class StreamingUpdateProcessor(Thread, UpdateProcessor):
                 for msg in messages:
                     if not self._running:
                         break
-                    message_ok = self.process_message(self._store, self._requester, msg)
+                    message_ok = self.process_message(self._environment, self._store, self._requester, msg)
                     if message_ok is True and self._ready.is_set() is False:
                         log.info("StreamingUpdateProcessor initialized ok.")
                         init_duration = int((time.time() - init_start) * 1000)
-                        request_success.fire(request_type="ld:init", name="server", response_time=init_duration, response_length=0)
+                        self._environment.events.request.fire(request_type="ld:init", name="server", response_time=init_duration, response_length=0, exception=None, context=None)
                         self._ready.set()
             except UnsuccessfulResponseException as e:
                 log.error(http_error_message(e.status, "stream connection"))
                 init_duration = int((time.time() - init_start) * 1000)
-                request_failure.fire(request_type="ld:init", name="server", response_time=init_duration, response_length=0, exception=e)
+                self._environment.events.request.fire(request_type="ld:init", name="server", response_time=init_duration, response_length=0, exception=e, context=None)
                 if not is_http_error_recoverable(e.status):
                     self._ready.set()  # if client is initializing, make it stop waiting; has no effect if already inited
                     self.stop()
                     break
             except Exception as e:
                 init_duration = int((time.time() - init_start) * 1000)
-                request_failure.fire(request_type="ld:init", name="server", response_time=init_duration, response_length=0, exception=e)
+                self._environment.events.request.fire(request_type="ld:init", name="server", response_time=init_duration, response_length=0, exception=e, context=None)
                 log.warning("Caught exception. Restarting stream connection after one second. %s" % e)
                 # no stacktrace here because, for a typical connection error, it'll just be a lengthy tour of urllib3 internals
             time.sleep(1)
@@ -94,6 +94,7 @@ class StreamingUpdateProcessor(Thread, UpdateProcessor):
                           on_backoff=log_backoff_message, giveup=should_not_retry)
     def _connect(self):
         return SSEClient(
+            self._environment,
             self._uri,
             headers=_stream_headers(self._config.sdk_key),
             connect_timeout=self._config.connect_timeout,
@@ -110,7 +111,7 @@ class StreamingUpdateProcessor(Thread, UpdateProcessor):
 
     # Returns True if we initialized the feature store
     @staticmethod
-    def process_message(store, requester, msg):
+    def process_message(environment, store, requester, msg):
         if msg.event == 'put':
             all_data = json.loads(msg.data)
             init_data = {
@@ -135,7 +136,7 @@ class StreamingUpdateProcessor(Thread, UpdateProcessor):
                     time_start = obj.get('variations', [None])[0]
                     if time_start is not None:
                         duration = int(recv_time - time_start)
-                        request_success.fire(request_type='sse:flag-update', name='/all', response_time=duration, response_length=0)
+                        environment.events.request.fire(request_type='sse:flag-update', name='/all', response_time=duration, response_length=0, exception=None, context=None)
             else:
                 log.warning("Patch for unknown path: %s", path)
         elif msg.event == "indirect/patch":

@@ -113,7 +113,7 @@ class MobileConfig(Config):
     :rtype: ldclient.config.Config
     """
     key = new_sdk_key or self.sdk_key
-    
+
     return MobileConfig(sdk_key=key,
                   base_uri=self.__base_uri,
                   events_uri=self.__events_uri,
@@ -275,7 +275,7 @@ class MobileConfig(Config):
   @property
   def http_proxy(self):
       return self.__http_proxy
-  
+
 
 
   def _validate(self):

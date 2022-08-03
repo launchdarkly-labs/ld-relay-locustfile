@@ -129,7 +129,7 @@ class StreamingUpdateProcessor(Thread, UpdateProcessor):
             obj = payload['data']
             log.debug("Received patch event for %s, New version: [%d]", path, obj.get("version"))
             target = StreamingUpdateProcessor._parse_path(path)
-            
+
             if target is not None:
                 store.upsert(target.kind, obj)
                 if target.kind.namespace == 'features' and target.key == 'locust-heartbeat':
@@ -176,6 +176,6 @@ class StreamingUpdateProcessor(Thread, UpdateProcessor):
     # magic methods for "with" statement (used in testing)
     def __enter__(self):
         return self
-    
+
     def __exit__(self, type, value, traceback):
         self.stop()

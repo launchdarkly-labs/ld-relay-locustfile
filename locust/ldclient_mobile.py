@@ -3,7 +3,7 @@ import hmac
 import threading
 import traceback
 
-from ldclient import LDClient 
+from ldclient import LDClient
 
 from config_mobile import MobileConfig
 from feature_requester_mobile import FeatureRequesterImpl
@@ -19,7 +19,6 @@ from ldclient.util import check_uwsgi, log
 from ldclient.versioned_data_kind import FEATURES, SEGMENTS
 from client_evaluate import evaluate
 
-
 # noinspection PyBroadException
 try:
     import queue
@@ -29,7 +28,6 @@ except:
 
 from threading import Lock
 
-
 class _FeatureStoreClientWrapper(FeatureStore):
     """Provides additional behavior that the client requires before or after feature store operations.
     Currently this just means sorting the data set for init(). In the future we may also use this
@@ -38,7 +36,7 @@ class _FeatureStoreClientWrapper(FeatureStore):
 
     def __init__(self, store):
         self.store = store
-    
+
     def init(self, all_data):
         return self.store.init(_FeatureStoreDataSetSorter.sort_all_collections(all_data))
 
@@ -70,20 +68,17 @@ class MobileLDClient(LDClient):
 
         if user is None:
           raise Exception("user is required for mobile sdk")
-    
+
         if config is not None and config.sdk_key is not None and sdk_key is not None:
             raise Exception("LaunchDarkly client init received both sdk_key and config with sdk_key. "
                             "Only one of either is expected")
-
-        
 
         if sdk_key is not None:
             log.warning("Deprecated sdk_key argument was passed to init. Use config object instead.")
             self._config = MobileConfig(sdk_key=sdk_key)
         else:
             self._config = config.copy_with_new_user(user) or MobileConfig.default().copy_with_new_user(user=user)
-        
-        
+
         self._config._validate()
 
         self._event_processor = None
@@ -104,15 +99,14 @@ class MobileLDClient(LDClient):
         update_processor_ready = threading.Event()
         self._update_processor = self._make_update_processor(self._config, self._store, update_processor_ready)
         self._update_processor.start()
-        
-        
+
         if start_wait > 0 and not self._config.offline and not self._config.use_ldd:
             log.info("Waiting up to " + str(start_wait) + " seconds for LaunchDarkly client to initialize...")
             update_processor_ready.wait(start_wait)
 
         if self._update_processor.initialized() is True:
             log.info("Started LaunchDarkly Client: OK")
-            
+
         else:
             log.warning("Initialization timeout exceeded for LaunchDarkly Client or an error occurred. "
                      "Feature Flags may not yet be available.")
@@ -124,7 +118,7 @@ class MobileLDClient(LDClient):
 
       if config.offline or config.use_ldd:
           return NullUpdateProcessor(config, store, ready)
-      
+
       if config.feature_requester_class:
           feature_requester = config.feature_requester_class(config)
       else:
@@ -191,10 +185,10 @@ class MobileLDClient(LDClient):
         """Determines the variation of a feature flag for a user, like :func:`variation()`, but also
         provides additional information about how this value was calculated, in the form of an
         :class:`ldclient.flag.EvaluationDetail` object.
-        
+
         Calling this method also causes the "reason" data to be included in analytics events,
         if you are capturing detailed event data for this flag.
-        
+
         :param string key: the unique key for the feature flag
         :param dict user: a dictionary containing parameters for the end user requesting the flag
         :param object default: the default value of the flag, to be used if the value is not
@@ -210,7 +204,7 @@ class MobileLDClient(LDClient):
 
         if self._config.offline:
             return EvaluationDetail(default, None, error_reason('CLIENT_NOT_READY'))
-        
+
         if not self.is_initialized():
             if self._store.initialized:
                 log.warning("Feature Flag evaluation attempted before client has initialized - using last known values from feature store for feature key: " + key)
@@ -220,7 +214,7 @@ class MobileLDClient(LDClient):
                 reason = error_reason('CLIENT_NOT_READY')
                 self._send_event(event_factory.new_unknown_flag_event(key, user, default, reason))
                 return EvaluationDetail(default, None, reason)
-        
+
         if user is not None and user.get('key', "") == "":
             raise ValueError('user must have a key')
 
@@ -255,7 +249,7 @@ class MobileLDClient(LDClient):
                 return EvaluationDetail(default, None, reason)
   def all_flags(self):
         """Returns all feature flag values for the given user.
-        
+
         This method is deprecated - please use :func:`all_flags_state()` instead. Current versions of the
         client-side SDK will not generate analytics events correctly if you pass the result of ``all_flags``.
         :param dict user: the end user requesting the feature flags
@@ -272,7 +266,7 @@ class MobileLDClient(LDClient):
         including the flag values and also metadata that can be used on the front end. See the
         JavaScript SDK Reference Guide on
         `Bootstrapping <https://docs.launchdarkly.com/docs/js-sdk-reference#section-bootstrapping>`_.
-        
+
         This method does not send analytics events back to LaunchDarkly.
         :param dict user: the end user requesting the feature flags
         :param kwargs: optional parameters affecting how the state is computed - see below
@@ -305,7 +299,7 @@ class MobileLDClient(LDClient):
         if user is None or user.get('key') is None:
             log.warning("User or user key is None when calling all_flags_state(). Returning empty state.")
             return FeatureFlagsState(False)
-        
+
         state = FeatureFlagsState(True)
         with_reasons = kwargs.get('with_reasons', False)
         details_only_if_tracked = kwargs.get('details_only_for_tracked_flags', False)
@@ -327,18 +321,18 @@ class MobileLDClient(LDClient):
                 log.debug(traceback.format_exc())
                 reason = {'kind': 'ERROR', 'errorKind': 'EXCEPTION'}
                 state.add_flag(flag, None, None, reason if with_reasons else None, details_only_if_tracked)
-        
+
         return state
   def secure_mode_hash(self):
         """Computes an HMAC signature of a user signed with the client's SDK key,
         for use with the JavaScript SDK.
         For more information, see the JavaScript SDK Reference Guide on
         `Secure mode <https://github.com/launchdarkly/js-client#secure-mode>`_.
-        
+
         :param dict user: the attributes of the user
         :return: a hash string that can be passed to the front end
         :rtype: string
         """
         raise Exception('not supported on mobile client')
-  
+
 __all__ = [ 'MobileLDClient', 'MobileConfig' ]

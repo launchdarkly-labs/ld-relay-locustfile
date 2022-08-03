@@ -25,7 +25,6 @@ from launchdarkly_locust import LaunchDarklyLocust, LaunchDarklyMobileLocust
 log = logging.getLogger()
 log.setLevel(logging.DEBUG)
 
-
 # example task set for launchdarkly mobile clients
 class LaunchDarklyMobileTaskSet(SequentialTaskSet):
     # wait_time = between(1, 30)
@@ -46,7 +45,7 @@ class LaunchDarklyMobileTaskSet(SequentialTaskSet):
         # we are now initialized so let's do some tasks
         # we will execute one of the following tasks every 1-30s
         wait_time = between(1, 30)
-        
+
         @task(10)
         def evaluate_flags(self):
             # evaluate a random flag
@@ -70,6 +69,7 @@ class LaunchDarklyMobileTaskSet(SequentialTaskSet):
             if not self._parent.parent.ldclient.is_initialized():
                 log.debug('failed to initialize after re-identify')
                 self.locust.close_client()
+
         @task(3)
         def track_event(self):
             # send a tracked event
@@ -77,7 +77,7 @@ class LaunchDarklyMobileTaskSet(SequentialTaskSet):
 
         @task(1)
         def done(self):
-            # stop executing the LDMobileTasks task set 
+            # stop executing the LDMobileTasks task set
             self.interrupt()
 
     @task
@@ -136,10 +136,6 @@ class LaunchDarklyBasicMobile(LaunchDarklyMobileLocust):
     # you can define any properties normally passed to LDClient.Config here
     # for example
     # evaluation_reasons=True
-
-
-
-
 
 # optionally try and load env from a json file
 # makes it easier to provision with terraform/cloudinit

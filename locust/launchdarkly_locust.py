@@ -34,14 +34,13 @@ class LaunchDarklyLocust(HttpUser):
         if self.stream_uri is None:
             self.stream_uri = self.host
 
-
-    # override this method in your subclass 
+    # override this method in your subclass
     # if you want to generate random users for each Locust instance
     def generate_user(self):
       return self.default_user
 
     # you can override this property if you to generate random users
-    # for each locust instance    
+    # for each locust instance
     @property
     def user(self):
       if self._user == None:
@@ -51,12 +50,12 @@ class LaunchDarklyLocust(HttpUser):
     def make_config(self):
         # do you believe in magic?
         # grab kwargs from our class attributes
-        args = { 
+        args = {
             arg: getattr(self, arg) for arg in \
                     filter(lambda x: hasattr(self, x) and x not in ['self', 'return', 'user'] ,
                         inspect.getfullargspec(self.config_class.__init__).args)
         }
-        
+
         return self.config_class(**args)
 
     def make_client(self):
@@ -68,7 +67,7 @@ class LaunchDarklyLocust(HttpUser):
         if self._ldclient is None:
           self._ldclient = self.make_client()
         return self._ldclient
-        
+
     def close_client(self):
         try:
             if self._ldclient is not None:

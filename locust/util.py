@@ -34,14 +34,14 @@ class LocustProxyPoolManager(urllib3.ProxyManager):
         start_time = time.time()
         name = clean_name(method, url)
         req_type = method
-        
+
         if is_stream and kw.get('headers', {}).get('Accept', 'lol') == 'text/event-stream':
           req_type = 'sse:connect'
-        
+
         resp = None
         content_len = 0
-        
-        try:  
+
+        try:
           resp = super(LocustProxyPoolManager, self).urlopen(method, url, redirect, **kw)
           if is_stream:
             content_len = int(resp.headers.get("content-length") or 0)
@@ -76,15 +76,15 @@ class LocustPoolManager(urllib3.PoolManager):
           newpath = '/'.join(parts)
           x = x._replace(path=newpath)
           name = urlunparse(x)
-        
+
 
         if is_stream and kw.get('headers', {}).get('Accept', 'lol') == 'text/event-stream':
           req_type = 'sse:connect'
-        
+
         resp = None
         content_len = 0
-        
-        try:  
+
+        try:
           resp = super(LocustPoolManager, self).urlopen(method, url, redirect, **kw)
           if is_stream:
             content_len = int(resp.headers.get("content-length") or 0)

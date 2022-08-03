@@ -140,7 +140,7 @@ class MobileStreamingUpdateProcessor(Thread, UpdateProcessor):
             store.init(all_data)
             log.debug("Received flags after ping event with %d flags", len(all_data[FEATURES]))
             return True
-            
+
         elif msg.event == 'delete':
             payload = json.loads(msg.data)
             key = payload.get('key')
@@ -164,6 +164,6 @@ class MobileStreamingUpdateProcessor(Thread, UpdateProcessor):
     # magic methods for "with" statement (used in testing)
     def __enter__(self):
         return self
-    
+
     def __exit__(self, type, value, traceback):
         self.stop()

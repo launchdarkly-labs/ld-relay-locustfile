@@ -239,7 +239,7 @@ class MobileLDClient(LDClient):
         else:
 
             try:
-                result = evaluate(flag, user, self._store, event_factory)
+                result = evaluate(flag)
                 for event in result.events or []:
                     self._send_event(event)
                 detail = result.detail
@@ -316,10 +316,10 @@ class MobileLDClient(LDClient):
         except Exception as e:
             log.error("Unable to read flags for all_flag_state: %s" % repr(e))
             return FeatureFlagsState(False)
-        
+
         for key, flag in flags_map.items():
             try:
-                detail = evaluate(flag, user, self._store, self._event_factory_default).detail
+                detail = evaluate(flag).detail
                 state.add_flag(flag, detail.value, detail.variation_index,
                     detail.reason if with_reasons else None, details_only_if_tracked)
             except Exception as e:

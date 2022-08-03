@@ -168,7 +168,7 @@ class MobileLDClient(LDClient):
         else:
             self._send_event(self._event_factory_default.new_identify_event(user))
             self.close()
-            self.__init__(user, config=self._config)
+            self.__init__(self._environment, user, config=self._config)
 
   def toggle(self, key, default):
         """Deprecated synonym for :func:`variation()`.

@@ -83,11 +83,14 @@ class LaunchDarklyMobileLocust(LaunchDarklyLocust):
     stream_uri = os.environ.get('LAUNCHDARKLY_MOBILE_STREAM_URI')
     client_class = MobileLDClient
     config_class = MobileConfig
-    # default classes for our mobile client are already instrumented for locust
-    feature_requester_class=None 
-    update_processor_class=None
+
+    def __init__(self, *args, **kwargs):
+        super(LaunchDarklyMobileLocust, self).__init__(*args, **kwargs)
+        # default classes for our mobile client are already instrumented for locust
+        self.feature_requester_class = None
+        self.update_processor_class = None
 
     def make_client(self, user=None):
         if user is None:
           user = self.user
-        return self.client_class(self.parent.environment, user, config=self.make_config())
+        return self.client_class(self.environment, user, config=self.make_config())

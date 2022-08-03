@@ -7,6 +7,9 @@ import gevent
 import json
 import time
 
+from locust import TaskSet, SequentialTaskSet, task, between
+# from locust.events import quitting
+# import locust.runners as runners
 
 from locust import HttpLocust, TaskSet, TaskSequence, task, between, seq_task, Locust
 from locust.events import quitting
@@ -24,21 +27,21 @@ log.setLevel(logging.DEBUG)
 
 
 # example task set for launchdarkly mobile clients
-class LaunchDarklyMobileTaskSet(TaskSequence):
-    wait_time = between(1, 30)
-    
+class LaunchDarklyMobileTaskSet(SequentialTaskSet):
+    # wait_time = between(1, 30)
+
     # first we will initialize the client
     # it will be automatically initialized by accessing the ldclient property
     # see the LaunchDarklyClass in launchdarkly.py for details
 
-    @seq_task(1)
+    @task
     def init_ldclient(self):
         log.debug('connecting to client')
-        if not self.locust.ldclient.is_initialized():
-            self.locust.close_client()
+        if not self.parent.ldclient.is_initialized():
+            self.parent.close_client()
             raise Exception('failed to initialize client')
 
-    @seq_task(2)
+    @task
     class LDMobileTasks(TaskSet):
         # we are now initialized so let's do some tasks
         # we will execute one of the following tasks every 1-30s
@@ -47,87 +50,89 @@ class LaunchDarklyMobileTaskSet(TaskSequence):
         @task(10)
         def evaluate_flags(self):
             # evaluate a random flag
-            # replace this with self.locust.variation(flag, default) calls
+            # replace this with self.parent.ldclient.variation(flag, default) calls
             # that match a realistic workload
-            flags = self.locust.ldclient.all_flags_state().to_values_map()
+            flags = self._parent.parent.ldclient.all_flags_state().to_values_map()
             flag, value = random.choice(list(flags.items()))
             log.debug('evaluating flag %s', flag)
-            self.locust.ldclient.variation(flag, None)
+            self._parent.parent.ldclient.variation(flag, None)
+
         @task(8)
         def reindentify(self):
             ##  re-identify with new properties
-            self.locust.ldclient.identify({
+            self._parent.parent.ldclient.identify({
                 "key": "anonymous",
                 "anonymous": True,
                 "custom": {
                     "groups": ["admin"]
                 }
             })
-            if not self.locust.ldclient.is_initialized():
+            if not self._parent.parent.ldclient.is_initialized():
                 log.debug('failed to initialize after re-identify')
                 self.locust.close_client()
         @task(3)
         def track_event(self):
             # send a tracked event
-            self.locust.ldclient.track('test_event', metric_value=1)
+            self._parent.parent.ldclient.track('test_event', metric_value=1)
+
         @task(1)
         def done(self):
             # stop executing the LDMobileTasks task set 
             self.interrupt()
-    @seq_task(3)
+
+    @task
     def disconnect(self):
         # when the LDMobileTask set is done executing, close the client
         # the locust will loop back to the first task and init a new client
         # this simulates a user leaving your application or losing network connectivity
-        self.locust.close_client()
+        self.parent.close_client()
 
     def on_stop(self):
-        self.locust.close_client()
+        self.parent.close_client()
 
-class LaunchDarklyServerTaskSet(TaskSequence):
-    wait_time = between(1, 30)
-    
-    @seq_task(1)
+class LaunchDarklyServerTaskSet(SequentialTaskSet):
+    @task
     def init_ldclient(self):
         log.debug('connecting to client')
-        ldclient = self.locust.ldclient
+        ldclient = self.parent.ldclient
         if not ldclient.is_initialized():
-            self.locust.close_client()
+            self.parent.close_client()
+            # self.user.close_client()
             raise Exception('failed to initialize client')
-    @seq_task(2)
+
+    @task
     class LDServerTasks(TaskSet):
-        wait_time = between(1, 30)
+        # wait_time = between(1, 30)
+
         @task(10)
         def evaluate_flags(self):
-            flags = self.locust.ldclient.all_flags_state(self.locust.user).to_values_map()
+            flags = self._parent.parent.ldclient.all_flags_state(self._parent.parent.user).to_values_map()
             flag, value = random.choice(list(flags.items()))
             log.debug('evaluating flag %s', flag)
-            self.locust.ldclient.variation(flag,self.locust.user, None)
+            self._parent.parent.ldclient.variation(flag,self._parent.parent.user, None)
+
         @task(3)
         def track_event(self):
-            self.locust.ldclient.track('test_event',self.locust.user, metric_value=1)
+            self._parent.parent.ldclient.track('test_event',self._parent.parent.user, metric_value=1)
+
         @task(1)
         def done(self):
             self.interrupt()
-    @seq_task(3)
+
+    @task
     def disconnect(self):
-        self.locust.close_client()
+        self.parent.close_client()
 
     def on_stop(self):
-        self.locust.close_client()
-
-
-
-            
+        self.parent.close_client()
 
 class LaunchDarklyBasicServer(LaunchDarklyLocust):
-    task_set = LaunchDarklyServerTaskSet
+    tasks = [LaunchDarklyServerTaskSet]
     weight = 1
 
-    
 class LaunchDarklyBasicMobile(LaunchDarklyMobileLocust):
+    tasks = [LaunchDarklyMobileTaskSet]
     weight = 2
-    task_set = LaunchDarklyMobileTaskSet
     # you can define any properties normally passed to LDClient.Config here
     # for example
     # evaluation_reasons=True

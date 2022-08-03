@@ -93,6 +93,7 @@ class MobileStreamingUpdateProcessor(Thread, UpdateProcessor):
                           on_backoff=log_backoff_message, giveup=should_not_retry)
     def _connect(self):
         return SSEClient(
+            self._environment,
             self._uri,
             headers=_stream_headers(self._config.sdk_key),
             connect_timeout=self._config.connect_timeout,

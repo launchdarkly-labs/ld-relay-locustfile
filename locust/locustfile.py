@@ -1,21 +1,14 @@
 import os
 import sys
 import logging
-import gevent
 import random
 import gevent
 import json
 import time
 
 from locust import TaskSet, SequentialTaskSet, task, between
-# from locust.events import quitting
-# import locust.runners as runners
-
-from locust import HttpLocust, TaskSet, TaskSequence, task, between, seq_task, Locust
-from locust.events import quitting
-import locust.runners as runners
-
-from gevent.event import Event
+from locust import events
+from locust.runners import STATE_STOPPING, STATE_STOPPED, STATE_CLEANUP, MasterRunner, LocalRunner
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -150,7 +143,7 @@ try:
 except Exception:
     pass
 
-def update_heartbeat_thread():
+def update_heartbeat_thread(environment):
     proj = os.environ.get('LOCUST_HEARTBEAT_PROJECT')
     api_key = os.environ.get('LOCUST_HEARTBEAT_API_KEY')
     if not proj:
@@ -159,50 +152,46 @@ def update_heartbeat_thread():
     if not api_key:
         log.error('set LOCUST_HEARTBEAT_API_KEY in order to enable flag update metrics')
         return
-   
+
     flag = 'locust-heartbeat'
     url_template = 'https://app.launchdarkly.com/api/v2/flags/{}/{}'
     update_endpoint = url_template.format(proj, flag)
-    # wait for the runner
-    while runners.locust_runner is None:
+    # # wait for the runner
+    while environment.runner is None:
         gevent.sleep(5)
-    
-    if is_master():
-        pool = create_http_pool_manager(num_pools=1, verify_ssl=True, target_base_uri='https://api.launchdarkly.com')
 
-        while True:
-            now = int(time.time() * 1000)
-            body = [{
-                "op": "replace",
-                "path": "/variations/0/value",
-                "value": now
-            }, {
-                "op": "replace",
-                "path": "/variations/1/value",
-                "value": now+1
-            }]
-            try:
-                resp = pool.request('PATCH', update_endpoint, headers={
-                    'Authorization': api_key,
-                    'Content-Type': 'application/json-patch+json',
-                    'Accept': 'application/json'
-                }, body=json.dumps(body).encode('utf-8'))
-            except Exception as e:
-                log.error('failed to update heartbeat flag %s', e)
-            gevent.sleep(30)
+    pool = create_http_pool_manager(environment, num_pools=1, verify_ssl=True, target_base_uri='https://api.launchdarkly.com')
 
+    while not environment.runner.state in [STATE_STOPPING, STATE_STOPPED, STATE_CLEANUP]:
+        now = int(time.time() * 1000)
+        body = [{
+            "op": "replace",
+            "path": "/variations/0/value",
+            "value": now
+        }, {
+            "op": "replace",
+            "path": "/variations/1/value",
+            "value": now+1
+        }]
+        try:
+            resp = pool.request('PATCH', update_endpoint, headers={
+                'Authorization': api_key,
+                'Content-Type': 'application/json-patch+json',
+                'Accept': 'application/json'
+            }, body=json.dumps(body).encode('utf-8'))
+        except Exception as e:
+            log.error('failed to update heartbeat flag %s', e)
+        gevent.sleep(30)
 
+def checker(environment):
+    while not environment.runner.state in [STATE_STOPPING, STATE_STOPPED, STATE_CLEANUP]:
+        time.sleep(1)
+        if environment.runner.stats.total.fail_ratio > 0.2:
+            environment.runner.quit()
+            return
 
-def is_master():
-    return isinstance(runners.locust_runner, runners.MasterLocustRunner) or isinstance(runners.locust_runner, runners.LocalLocustRunner)
-
-thread = gevent.spawn(update_heartbeat_thread)
-quitting += lambda: gevent.kill(thread)
-
-
-
-
-#x = MobileConfig(sdk_key=os.environ.get('LAUNCHDARKLY_MOBILE_KEY'))
-#c = MobileLDClient({"key": "anonymous", "anonymous": True}, config=x)
-#
-#c.variation("fooooo", None)
+@events.init.add_listener
+def on_locust_init(environment, **_kwargs):
+    # dont run this on workers, we only care about the aggregated numbers
+    if isinstance(environment.runner, MasterRunner) or isinstance(environment.runner, LocalRunner):
+        gevent.spawn(update_heartbeat_thread, environment)

@@ -16,7 +16,6 @@ from ldclient.interfaces import UpdateProcessor
 from sse_client import SSEClient
 from ldclient.util import _stream_headers, log, UnsuccessfulResponseException, http_error_message, is_http_error_recoverable
 from ldclient.versioned_data_kind import FEATURES, SEGMENTS
-from locust.event import Events
 
 # allows for up to 5 minutes to elapse without any data sent across the stream. The heartbeats sent as comments on the
 # stream will keep this from triggering

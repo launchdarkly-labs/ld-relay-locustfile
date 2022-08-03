@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import threading
 import traceback
 
@@ -11,20 +9,13 @@ from ldclient.feature_store import _FeatureStoreDataSetSorter
 from ldclient.flag import EvaluationDetail, error_reason
 from ldclient.flags_state import FeatureFlagsState
 from ldclient.impl.event_factory import _EventFactory
-from ldclient.impl.stubs import NullEventProcessor, NullUpdateProcessor
+from ldclient.impl.stubs import NullUpdateProcessor
 from ldclient.interfaces import FeatureStore
 from ldclient.polling import PollingUpdateProcessor
 from streaming_mobile import MobileStreamingUpdateProcessor as StreamingUpdateProcessor
-from ldclient.util import check_uwsgi, log
-from ldclient.versioned_data_kind import FEATURES, SEGMENTS
+from ldclient.util import log
+from ldclient.versioned_data_kind import FEATURES
 from client_evaluate import evaluate
-
-# noinspection PyBroadException
-try:
-    import queue
-except:
-    # noinspection PyUnresolvedReferences,PyPep8Naming
-    import Queue as queue  # Python 3
 
 from threading import Lock
 

@@ -8,13 +8,10 @@ import json
 import urllib3
 
 from ldclient.interfaces import FeatureRequester
-from ldclient.util import UnsuccessfulResponseException
 from util import _headers, create_http_pool_manager
 from ldclient.util import log
 from ldclient.util import throw_if_unsuccessful_response
-from ldclient.versioned_data_kind import FEATURES, SEGMENTS
-from ldclient.user_filter import UserFilter
-from base64 import urlsafe_b64encode
+from ldclient.versioned_data_kind import FEATURES
 
 EVALX_GET = '/msdk/evalx/users'
 EVALX_REPORT = '/msdk/evalx/user'

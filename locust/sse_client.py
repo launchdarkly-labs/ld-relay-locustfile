@@ -15,7 +15,6 @@ import urllib3
 from util import create_http_pool_manager, clean_name
 from ldclient.util import log
 from ldclient.util import throw_if_unsuccessful_response
-from locust.event import Events
 import time
 # Technically, we should support streams that mix line endings.  This regex,
 # however, assumes that a system will provide consistent line endings.
@@ -123,7 +122,6 @@ class SSEClient(object):
     # what we're doing.
     if six.PY2:
         next = __next__
-
 
 class Event(object):
 

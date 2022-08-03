@@ -1,14 +1,10 @@
 from ldclient.version import VERSION
 from ldclient.util import _get_proxy_url, certifi, throw_if_unsuccessful_response, UnsuccessfulResponseException
-from locust.event import Events
 import urllib3
 import time
-try:
-  from urlparse import urlparse, urlunparse
-except ImportError:
-  from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse
 
-def _headers(sdk_key, client='PythonClient', with_auth=True):
+def _headers(sdk_key, client='PythonClient'):
   return {'Authorization': sdk_key, 'User-Agent': '{0}/{1}'.format(client, VERSION),
             'Content-Type': "application/json"}
 
@@ -76,7 +72,6 @@ class LocustPoolManager(urllib3.PoolManager):
           newpath = '/'.join(parts)
           x = x._replace(path=newpath)
           name = urlunparse(x)
-
 
         if is_stream and kw.get('headers', {}).get('Accept', 'lol') == 'text/event-stream':
           req_type = 'sse:connect'

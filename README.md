@@ -144,7 +144,7 @@ LOCUST_MODE=slave
 LOCUST_MASTER_HOST=<hostname of master>
 ```
 
-For more information, refer to [Locust Documentation](https://docs.locust.io/en/stable/running-locust-docker.html)
+For more information, refer to [Locust Documentation](https://docs.locust.io/en/stable/running-distributed.html)
 
 
 ## FAQ

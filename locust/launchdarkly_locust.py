@@ -20,6 +20,7 @@ class LaunchDarklyLocust(Locust):
     base_uri = os.environ.get('LAUNCHDARKLY_BASE_URI')
     events_uri = os.environ.get('LAUNCHDARKLY_EVENTS_URI')
     stream_uri = os.environ.get('LAUNCHDARKLY_STREAM_URI')
+    send_events = False  # https://docs.launchdarkly.com/guides/flags/testing-code#managing-test-data-in-your-production-environment
     event_processor_class = LocustEventDispatcher
     feature_requester_class = LocustServerFeatureRequester
     update_processor_class = LocustStreamingProcessor

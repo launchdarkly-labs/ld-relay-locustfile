@@ -37,7 +37,7 @@ from urllib.parse import urlencode
 
 import urllib3
 from ld_eventsource import SSEClient
-from ld_eventsource.actions import Comment, Event, Fault, Start
+from ld_eventsource.actions import Event, Fault, Start
 from ld_eventsource.config import (
     ConnectStrategy,
     ErrorStrategy,
@@ -382,7 +382,6 @@ class MobileLDClient:
         self._sse: Optional[SSEClient] = None
         self._stream_uri_full = self._build_stream_uri()
         self._init_started_at = 0.0
-        self._last_heartbeat: Optional[float] = None
 
         self._stream_thread = threading.Thread(target=self._run_stream, name="ld-mobile-stream", daemon=True)
         self._stream_thread.start()
@@ -529,8 +528,6 @@ class MobileLDClient:
                     break
                 if isinstance(action, Start):
                     self._on_stream_start(failed=False)
-                elif isinstance(action, Comment):
-                    self._record_heartbeat()
                 elif isinstance(action, Event):
                     self._handle_event(action)
                 elif isinstance(action, Fault) and action.error is not None:
@@ -547,26 +544,9 @@ class MobileLDClient:
                 pass
 
     def _on_stream_start(self, *, failed: bool) -> None:
-        self._last_heartbeat = time.time()
         if self._diagnostic_accumulator is not None and self._init_started_at > 0:
             duration_ms = int((time.time() - self._init_started_at) * 1000)
             self._diagnostic_accumulator.record_stream_init(_now_ms(), duration_ms, failed)
-
-    def _record_heartbeat(self) -> None:
-        now = time.time()
-        anchor = self._last_heartbeat or self._init_started_at
-        if anchor:
-            locust_events.request.fire(
-                request_type="sse:heartbeat",
-                name=clean_name("GET", self._stream_uri_full),
-                response_time=int((now - anchor) * 1000),
-                response_length=0,
-                response=None,
-                exception=None,
-                context={},
-                url=self._stream_uri_full,
-            )
-        self._last_heartbeat = now
 
     def _handle_event(self, msg: Event) -> None:
         if msg.event == "put":
@@ -621,7 +601,7 @@ class MobileLDClient:
         duration = int(time.time() * 1000 - value)
         locust_events.request.fire(
             request_type="sse:flag-update",
-            name="/meval",
+            name="mobile",
             response_time=duration,
             response_length=0,
             response=None,

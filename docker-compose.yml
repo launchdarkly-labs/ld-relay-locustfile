@@ -18,11 +18,7 @@ services:
       - LAUNCHDARKLY_MOBILE_KEY
       - LAUNCHDARKLY_HEARTBEAT_PROJECT
       - LAUNCHDARKLY_HEARTBEAT_API_KEY
-      - TARGET_URL=http://ldrelay:8030
-      - LAUNCHDARKLY_BASE_URI=http://ldrelay:8030
-      - LAUNCHDARKLY_EVENTS_URI=http://ldrelay:8030
-      - LAUNCHDARKLY_STREAM_URI=http://ldrelay:8030
-      - LAUNCHDARKLY_MOBILE_STREAM_URI=http://ldrelay:8030
+      - LOCUST_HOST=http://ldrelay:8030
     depends_on:
       - ldrelay
     ports:

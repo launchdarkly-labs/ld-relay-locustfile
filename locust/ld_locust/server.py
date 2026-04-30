@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 from ld_eventsource import SSEClient
 from ld_eventsource.actions import Event
@@ -36,8 +36,10 @@ from ldclient.impl.datasource.streaming import (
     BACKOFF_RESET_INTERVAL,
     JITTER_RATIO,
     MAX_RETRY_DELAY,
-    StreamingUpdateProcessor as _UpstreamStreaming,
     stream_read_timeout,
+)
+from ldclient.impl.datasource.streaming import (
+    StreamingUpdateProcessor as _UpstreamStreaming,
 )
 from ldclient.impl.events.diagnostics import (
     _DiagnosticAccumulator,
@@ -46,6 +48,7 @@ from ldclient.impl.events.diagnostics import (
 from ldclient.impl.events.event_processor import DefaultEventProcessor
 from ldclient.impl.util import log as _sdk_log
 from ldclient.versioned_data_kind import FEATURES
+
 from locust import User, events
 
 from .transport import LocustHTTPFactory, ld_headers
@@ -192,7 +195,7 @@ class _EvalLatencyHook(Hook):
         if t0 is not None:
             duration_ms = int((time.perf_counter() - t0) * 1000)
             reason = detail.reason or {}
-            exc: Optional[Exception] = None
+            exc: Exception | None = None
             if reason.get("kind") == "ERROR":
                 exc = RuntimeError(reason.get("errorKind") or "unknown")
             events.request.fire(
@@ -227,18 +230,18 @@ class LaunchDarklyLocust(User):
 
     abstract = True
 
-    sdk_key: Optional[str] = os.environ.get("LAUNCHDARKLY_SDK_KEY")
-    base_uri: Optional[str] = os.environ.get("LAUNCHDARKLY_BASE_URI")
-    events_uri: Optional[str] = os.environ.get("LAUNCHDARKLY_EVENTS_URI")
-    stream_uri: Optional[str] = os.environ.get("LAUNCHDARKLY_STREAM_URI")
+    sdk_key: str | None = os.environ.get("LAUNCHDARKLY_SDK_KEY")
+    base_uri: str | None = os.environ.get("LAUNCHDARKLY_BASE_URI")
+    events_uri: str | None = os.environ.get("LAUNCHDARKLY_EVENTS_URI")
+    stream_uri: str | None = os.environ.get("LAUNCHDARKLY_STREAM_URI")
     # https://docs.launchdarkly.com/guides/flags/testing-code#managing-test-data-in-your-production-environment
     send_events: bool = False
     config_overrides: dict = {}
 
     def __init__(self, environment) -> None:
         super().__init__(environment)
-        self._ldclient: Optional[LDClient] = None
-        self._context: Optional[Context] = None
+        self._ldclient: LDClient | None = None
+        self._context: Context | None = None
         if not self.base_uri:
             self.base_uri = self.host
         if not self.events_uri:

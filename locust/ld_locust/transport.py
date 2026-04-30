@@ -14,15 +14,14 @@ from urllib.parse import urlparse, urlunparse
 
 import certifi
 import urllib3
-
 from ldclient.impl.http import HTTPFactory, _get_proxy_url
 from ldclient.impl.util import (
     UnsuccessfulResponseException,
     throw_if_unsuccessful_response,
 )
 from ldclient.version import VERSION
-from locust import events
 
+from locust import events
 
 MOBILE_USER_AGENT = "PythonMobileEmulator/locust"
 

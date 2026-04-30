@@ -13,14 +13,14 @@ import logging
 import os
 import random
 
-from ldclient import Context
-from locust import SequentialTaskSet, TaskSet, between, task
-
 from ld_locust import (
     LaunchDarklyLocust,
     LaunchDarklyMobileLocust,
     enable_flag_propagation_metric,
 )
+from ldclient import Context
+
+from locust import SequentialTaskSet, TaskSet, between, task
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ except (OSError, ValueError):
 
 
 # --- Mobile workload ---------------------------------------------------------
+
 
 class LaunchDarklyMobileTaskSet(SequentialTaskSet):
     wait_time = between(1, 30)
@@ -60,12 +61,7 @@ class LaunchDarklyMobileTaskSet(SequentialTaskSet):
 
         @task(8)
         def reidentify(self) -> None:
-            new_context = (
-                Context.builder("anonymous")
-                .anonymous(True)
-                .set("groups", ["admin"])
-                .build()
-            )
+            new_context = Context.builder("anonymous").anonymous(True).set("groups", ["admin"]).build()
             self.user.ldclient.identify(new_context)
             if not self.user.ldclient.is_initialized():
                 self.user.close_client()
@@ -89,6 +85,7 @@ class LaunchDarklyMobileTaskSet(SequentialTaskSet):
 
 
 # --- Server workload ---------------------------------------------------------
+
 
 class LaunchDarklyServerTaskSet(SequentialTaskSet):
     wait_time = between(1, 30)
@@ -128,6 +125,7 @@ class LaunchDarklyServerTaskSet(SequentialTaskSet):
 
 
 # --- User mix ----------------------------------------------------------------
+
 
 class LaunchDarklyBasicServer(LaunchDarklyLocust):
     tasks = [LaunchDarklyServerTaskSet]

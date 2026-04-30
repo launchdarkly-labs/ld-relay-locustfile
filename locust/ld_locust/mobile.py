@@ -32,7 +32,8 @@ import os
 import threading
 import time
 from base64 import urlsafe_b64encode
-from typing import Any, Dict, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any
 from urllib.parse import urlencode
 
 import urllib3
@@ -54,6 +55,7 @@ from ldclient.impl.events.types import (
     EventFactory,
     EventInputEvaluation,
 )
+
 from locust import events as locust_events
 
 from .server import LaunchDarklyLocust, LocustEventDispatcher
@@ -88,7 +90,7 @@ def _context_b64(context: Context) -> str:
 def _eval_latency_metric(method: str) -> Iterator[None]:
     """Time a flag evaluation and emit an ``ld:eval`` Locust request event."""
     start = time.perf_counter()
-    exc: Optional[Exception] = None
+    exc: Exception | None = None
     try:
         yield
     except Exception as e:
@@ -147,7 +149,7 @@ class MobileConfig(Config):
         self._mobile_key = mobile_key
 
     @property
-    def sdk_key(self) -> Optional[str]:  # type: ignore[override]
+    def sdk_key(self) -> str | None:  # type: ignore[override]
         # Mobile SDKs send Authorization: api_key <mobileKey>
         raw = self._mobile_key
         return f"api_key {raw}" if raw else ""
@@ -169,15 +171,15 @@ class MobileConfig(Config):
 class _FlagStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._flags: Dict[str, Dict[str, Any]] = {}
+        self._flags: dict[str, dict[str, Any]] = {}
         self._initialized = False
 
-    def init(self, flags: Dict[str, Dict[str, Any]]) -> None:
+    def init(self, flags: dict[str, dict[str, Any]]) -> None:
         with self._lock:
             self._flags = {k: {**v, "key": k} for k, v in flags.items()}
             self._initialized = True
 
-    def upsert(self, flag: Dict[str, Any]) -> None:
+    def upsert(self, flag: dict[str, Any]) -> None:
         key = flag.get("key")
         if not key:
             return
@@ -193,12 +195,12 @@ class _FlagStore:
             if not existing or existing.get("version", -1) < version:
                 self._flags[key] = {"key": key, "version": version, "deleted": True}
 
-    def get(self, key: str) -> Optional[Dict[str, Any]]:
+    def get(self, key: str) -> dict[str, Any] | None:
         with self._lock:
             flag = self._flags.get(key)
             return None if flag is None or flag.get("deleted") else flag
 
-    def all(self) -> Dict[str, Dict[str, Any]]:
+    def all(self) -> dict[str, dict[str, Any]]:
         with self._lock:
             return {k: v for k, v in self._flags.items() if not v.get("deleted")}
 
@@ -240,7 +242,7 @@ class _FlagProxy:
         "rules",
     )
 
-    def __init__(self, flag: Dict[str, Any]) -> None:
+    def __init__(self, flag: dict[str, Any]) -> None:
         self.key = flag.get("key", "")
         # versionForEvents semantics
         self.version = flag.get("flagVersion") or flag.get("version") or 0
@@ -262,12 +264,17 @@ class _MobileEventDispatcher(EventDispatcher):
 class _MobileFeatureRequester:
     """Polling fallback used when a ``ping`` event is received."""
 
-    def __init__(self, base_uri: str, mobile_key: str, verify_ssl: bool, http_proxy: Optional[str]) -> None:
+    def __init__(self, base_uri: str, mobile_key: str, verify_ssl: bool, http_proxy: str | None) -> None:
         self._base_uri = base_uri.rstrip("/")
         self._mobile_key = mobile_key
-        self._http = create_http_pool_manager(num_pools=1, verify_ssl=verify_ssl, target_base_uri=self._base_uri, force_proxy=http_proxy)
+        self._http = create_http_pool_manager(
+            num_pools=1,
+            verify_ssl=verify_ssl,
+            target_base_uri=self._base_uri,
+            force_proxy=http_proxy,
+        )
 
-    def get_all(self, context: Context) -> Dict[str, Dict[str, Any]]:
+    def get_all(self, context: Context) -> dict[str, dict[str, Any]]:
         uri = f"{self._base_uri}{EVALX_CONTEXTS_PATH}/{_context_b64(context)}"
         hdrs = mobile_headers(self._mobile_key)
         hdrs["Accept"] = "application/json"
@@ -306,7 +313,7 @@ class MobileLDClient:
         events_uri: str = "https://mobile.launchdarkly.com",
         send_events: bool = False,
         verify_ssl: bool = True,
-        http_proxy: Optional[str] = None,
+        http_proxy: str | None = None,
         evaluation_reasons: bool = False,
         diagnostic_opt_out: bool = False,
         enable_event_compression: bool = False,
@@ -314,7 +321,7 @@ class MobileLDClient:
         event_capacity: int = DEFAULT_EVENT_CAPACITY,
         diagnostic_recording_interval: float = DEFAULT_DIAGNOSTIC_INTERVAL,
         all_attributes_private: bool = False,
-        private_attributes: Optional[set] = None,
+        private_attributes: set | None = None,
         omit_anonymous_contexts: bool = False,
         start_wait: float = 5.0,
         initial_reconnect_delay: float = 1.0,
@@ -366,7 +373,7 @@ class MobileLDClient:
         # suppressing dispatcher subclass. That alone covers summary, debug,
         # sampling, gzip, retries, payload-id headers, and diagnostic init/
         # stats - we own only the mobile-specific deltas.
-        self._diagnostic_accumulator: Optional[_DiagnosticAccumulator] = None
+        self._diagnostic_accumulator: _DiagnosticAccumulator | None = None
         self._event_processor = None
         if send_events:
             if not diagnostic_opt_out:
@@ -379,7 +386,7 @@ class MobileLDClient:
 
         self._closed_flag = threading.Event()
         self._ready = threading.Event()
-        self._sse: Optional[SSEClient] = None
+        self._sse: SSEClient | None = None
         self._stream_uri_full = self._build_stream_uri()
         self._init_started_at = 0.0
 
@@ -399,12 +406,12 @@ class MobileLDClient:
             detail, _ = self._evaluate(key, default, self._event_factory_default)
         return detail["value"]
 
-    def variation_detail(self, key: str, default: Any) -> Dict[str, Any]:
+    def variation_detail(self, key: str, default: Any) -> dict[str, Any]:
         with _eval_latency_metric("variation_detail"):
             detail, _ = self._evaluate(key, default, self._event_factory_with_reasons)
         return detail
 
-    def all_flags_state(self) -> "_AllFlagsState":
+    def all_flags_state(self) -> _AllFlagsState:
         return _AllFlagsState(self._store.all())
 
     def identify(self, context: Context) -> None:
@@ -414,7 +421,7 @@ class MobileLDClient:
             self._event_processor.send_event(self._event_factory_default.new_identify_event(context))
         self._reconnect_with_context(context)
 
-    def track(self, event_name: str, data: Any = None, metric_value: Optional[float] = None) -> None:
+    def track(self, event_name: str, data: Any = None, metric_value: float | None = None) -> None:
         if self._event_processor is None:
             return
         evt = self._event_factory_default.new_custom_event(event_name, self._context, data, metric_value)
@@ -442,10 +449,10 @@ class MobileLDClient:
     def _evaluate(self, key: str, default: Any, factory: EventFactory):
         flag_dict = self._store.get(key)
         if flag_dict is None:
-            value = default
-            detail = {"value": value, "variationIndex": None, "reason": {"kind": "ERROR", "errorKind": "FLAG_NOT_FOUND"}}
+            reason = {"kind": "ERROR", "errorKind": "FLAG_NOT_FOUND"}
+            detail = {"value": default, "variationIndex": None, "reason": reason}
             if self._event_processor is not None:
-                self._event_processor.send_event(factory.new_unknown_flag_event(key, self._context, default, detail["reason"]))
+                self._event_processor.send_event(factory.new_unknown_flag_event(key, self._context, default, reason))
             return detail, None
 
         flag = _FlagProxy(flag_dict)
@@ -589,7 +596,7 @@ class MobileLDClient:
         self._ready.set()
 
     @staticmethod
-    def _record_flag_update_metric(payload: Dict[str, Any]) -> None:
+    def _record_flag_update_metric(payload: dict[str, Any]) -> None:
         if payload.get("key") != HEARTBEAT_FLAG_KEY:
             return
         try:
@@ -612,14 +619,14 @@ class MobileLDClient:
 
 
 class _AllFlagsState:
-    def __init__(self, flags: Dict[str, Dict[str, Any]]):
+    def __init__(self, flags: dict[str, dict[str, Any]]):
         self._flags = flags
 
     @property
     def valid(self) -> bool:
         return True
 
-    def to_values_map(self) -> Dict[str, Any]:
+    def to_values_map(self) -> dict[str, Any]:
         return {k: v.get("value") for k, v in self._flags.items()}
 
 
@@ -633,8 +640,8 @@ class LaunchDarklyMobileLocust(LaunchDarklyLocust):
 
     abstract = True
 
-    sdk_key: Optional[str] = os.environ.get("LAUNCHDARKLY_MOBILE_KEY")
-    stream_uri: Optional[str] = os.environ.get("LAUNCHDARKLY_MOBILE_STREAM_URI")
+    sdk_key: str | None = os.environ.get("LAUNCHDARKLY_MOBILE_KEY")
+    stream_uri: str | None = os.environ.get("LAUNCHDARKLY_MOBILE_STREAM_URI")
 
     def make_client(self) -> MobileLDClient:  # type: ignore[override]
         return MobileLDClient(

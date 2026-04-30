@@ -21,8 +21,9 @@ import os
 import time
 
 import gevent
-from locust import events
 from locust.runners import LocalRunner, MasterRunner
+
+from locust import events
 
 from .transport import create_http_pool_manager
 
@@ -67,10 +68,12 @@ def _run_heartbeat(runner, project: str, api_key: str, flag_key: str, interval_s
     }
     while runner.state != "stopped":
         now_ms = int(time.time() * 1000)
-        body = json.dumps([
-            {"op": "replace", "path": "/variations/0/value", "value": now_ms},
-            {"op": "replace", "path": "/variations/1/value", "value": now_ms + 1},
-        ]).encode("utf-8")
+        body = json.dumps(
+            [
+                {"op": "replace", "path": "/variations/0/value", "value": now_ms},
+                {"op": "replace", "path": "/variations/1/value", "value": now_ms + 1},
+            ]
+        ).encode("utf-8")
         try:
             pool.request("PATCH", update_endpoint, headers=headers, body=body)
         except Exception as exc:

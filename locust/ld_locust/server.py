@@ -39,6 +39,10 @@ from ldclient.impl.datasource.streaming import (
     StreamingUpdateProcessor as _UpstreamStreaming,
     stream_read_timeout,
 )
+from ldclient.impl.events.diagnostics import (
+    _DiagnosticAccumulator,
+    create_diagnostic_id,
+)
 from ldclient.impl.events.event_processor import DefaultEventProcessor
 from ldclient.impl.util import log as _sdk_log
 from ldclient.versioned_data_kind import FEATURES
@@ -57,10 +61,19 @@ HEARTBEAT_FLAG_KEY = "locust-heartbeat"
 
 
 class LocustEventDispatcher(DefaultEventProcessor):
-    """``DefaultEventProcessor`` whose HTTP pool fires Locust ``request`` events."""
+    """``DefaultEventProcessor`` whose HTTP pool fires Locust ``request`` events.
+
+    Also auto-creates a ``_DiagnosticAccumulator`` when one isn't supplied and
+    ``diagnostic_opt_out`` is False. This matches what the LDClient does for
+    its own built-in dispatcher; LDClient *doesn't* do it for user-supplied
+    ``event_processor_class``, so without this we'd silently lose the
+    ``diagnostic-init`` and periodic ``diagnostic`` events on the server side.
+    """
 
     def __init__(self, config, diagnostic_accumulator=None, dispatcher_class=None):
         http = LocustHTTPFactory(ld_headers(config.sdk_key), config.http).create_pool_manager(1, config.events_uri)
+        if diagnostic_accumulator is None and not config.diagnostic_opt_out:
+            diagnostic_accumulator = _DiagnosticAccumulator(create_diagnostic_id(config))
         super().__init__(
             config,
             http=http,
@@ -146,7 +159,7 @@ class LocustStreamingProcessor(_UpstreamStreaming):
                         duration = int(time.time() * 1000 - sent)
                         events.request.fire(
                             request_type="sse:flag-update",
-                            name="/all",
+                            name="server",
                             response_time=duration,
                             response_length=0,
                             response=None,
@@ -257,7 +270,6 @@ class LaunchDarklyLocust(User):
             update_processor_class=LocustStreamingProcessor,
             event_processor_class=LocustEventDispatcher,
             feature_requester_class=LocustFeatureRequester,
-            diagnostic_opt_out=True,
             hooks=[_EvalLatencyHook()],
         )
         kwargs.update(copy.deepcopy(self.config_overrides))

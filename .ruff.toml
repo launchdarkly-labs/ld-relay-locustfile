@@ -1,0 +1,38 @@
+# Ruff config (https://docs.astral.sh/ruff/configuration/).
+#
+# Run locally with `pre-commit run --all-files` (see .pre-commit-config.yaml)
+# or directly: `ruff check .` and `ruff format .`.
+
+# The README says "Python 3.10+", and the upstream LaunchDarkly server SDK
+# requires >=3.10. We follow the same floor here.
+target-version = "py310"
+
+# Comfortable for the existing style; tight enough to catch the worst run-on
+# function calls. Bump if specific files need it (use a `[per-file-ignores]`
+# block rather than raising globally).
+line-length = 120
+
+# We instrument and re-export bits of the locust package that aren't ours.
+extend-exclude = ["reference"]
+
+[lint]
+# Conservative initial rule set:
+#   F  - pyflakes (undefined names, unused imports, unused vars)
+#   E,W - pycodestyle (PEP 8 errors / warnings)
+#   I  - isort (import order)
+#   UP - pyupgrade (modernize syntax for the target version)
+#   B  - flake8-bugbear (common Python footguns)
+select = ["F", "E", "W", "I", "UP", "B"]
+
+# A handful of pragmatic exceptions we don't want to fight:
+#   E501 - long lines: ruff format already wraps where it can, the rest are
+#          intentional (URLs, JSON one-liners, etc.). The format step keeps
+#          us honest globally; spot violations are noise.
+#   B008 - mutable default argument warning fires on the upstream Config
+#          signature when we subclass it, which is out of our control.
+ignore = ["E501", "B008"]
+
+[lint.per-file-ignores]
+# locustfile.py is a script Locust loads by name; unused imports in it are
+# usually re-exports for the user to extend, not dead code.
+"locust/locustfile.py" = ["F401"]

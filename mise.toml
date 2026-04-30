@@ -1,0 +1,27 @@
+# Per-project tool versions managed by mise (https://mise.jdx.dev/).
+#
+# After cloning, run `mise install` once to bootstrap everything declared here,
+# then `pre-commit install` to enable the git hooks. Day to day: `mise exec --
+# pre-commit run --all-files`, `mise exec -- ldcli ...`, etc. (mise also
+# auto-activates these binaries on PATH when you `cd` into the repo if you've
+# set up the shell hook.)
+#
+# Per-developer secrets (LAUNCHDARKLY_SDK_KEY etc.) live in mise.local.toml
+# which is gitignored.
+
+[tools]
+# pre-commit runs the lint + format hooks listed in .pre-commit-config.yaml.
+# Aqua provides a self-contained binary (a .pyz with its own bundled Python),
+# so we don't manage a project Python via mise - whatever Python you have
+# locally is fine for running locust outside Docker.
+pre-commit = "latest"
+
+# Ad-hoc invocation outside pre-commit ("ruff check locust/", "ruff format")
+# without bouncing through pre-commit's hook environment. The version
+# pre-commit *uses* is still pinned independently in .pre-commit-config.yaml.
+ruff = "latest"
+
+# Used for bootstrapping the heartbeat flag and managing the heartbeat
+# service token - see the README "Provisioning the role and token with ldcli"
+# section. Latest in case the LaunchDarkly API surface evolves.
+"ubi:launchdarkly/ldcli" = "latest"

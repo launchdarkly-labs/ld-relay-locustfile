@@ -1,5 +1,3 @@
-version: '2'
-
 services:
   ldrelay:
     image: launchdarkly/ld-relay
@@ -8,7 +6,7 @@ services:
       - LD_MOBILE_KEY_BENCHMARK=${LAUNCHDARKLY_MOBILE_KEY}
       - USE_EVENTS=true
     ports:
-      - "8030:8039"
+      - "8030:8030"
 
   master:
     image: locust-ld-relay

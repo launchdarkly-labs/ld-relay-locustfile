@@ -4,177 +4,284 @@
 # LD-Relay Locust File
 
 
-This is a locust file meant to emulate the load of launchdarkly server and mobile clients.
+This is a locust file meant to emulate the load of LaunchDarkly server and mobile clients against an [LD Relay Proxy](https://github.com/launchdarkly/ld-relay) instance.
 
 
 # Setup
 
 ## Prerequisites
 
-If you are running the testing infrastructure outside of Docker you will need to install the dependencies. This project utilizes `Python 3`, and `Locust 0.13.5`. You can install the required version of Locust with:
+If you are running the testing infrastructure outside of Docker you will need Python 3.10+ along with [Locust 2.x](https://docs.locust.io/) and the LaunchDarkly server SDK 9.x. From the project root:
 
-```
-pip3 install locustio==0.13.5
+```sh
+pip install --upgrade pip
+pip install -r locust/requirements.txt
+pip install 'locust>=2.43,<3'
 ```
 
-As with many Python projects you will also need to install the dependencies listed in `requirements.txt`. Enter the `locust` directory and run:
-
-```
-pip3 install -r requirements.txt
-```
+(The Docker image bundles a pinned `locustio/locust` base, so you do not need to install Locust separately when using Docker.)
 
 
 ## Optional: Configure a flag heartbeat
 
-This will allow you gather metrics on how long it takes for a flag to propogate to clients. If you do not follow these steps, you will not get these metrics in Locust but the tests will still run.
+This will allow you to gather metrics on how long it takes for a flag update to propagate to clients. If you do not follow these steps, the tests will still run, but you will not get the `sse:flag-update` metric.
 
-- Create a flag with the key `locust-heartbeat` with the type number with two variations
-- Create an api key that can modify this flag (see the example token policy below)
+1. Create the flag (a `number` flag with two variations) - see [Creating the heartbeat flag](#creating-the-heartbeat-flag).
+2. Create an API key that can modify it - see [Locust API token policy](#locust-api-token-policy).
+
+### Creating the heartbeat flag
+
+Easiest path is via [`ldcli`](https://launchdarkly.com/docs/home/getting-started/ldcli):
+
+```sh
+ldcli flags create --project <YOUR_PROJECT_KEY> -ojson --data "$(jq -n '{
+  key: "locust-heartbeat",
+  name: "Locust Heartbeat",
+  description: "Updated by ld-relay-locustfile master to time flag propagation. Variation values are current epoch-ms.",
+  kind: "multivariate",
+  temporary: false,
+  tags: ["locust", "load-test"],
+  variations: [
+    {value: 0, name: "tick-a"},
+    {value: 1, name: "tick-b"}
+  ],
+  defaults: {onVariation: 0, offVariation: 0},
+  clientSideAvailability: {usingMobileKey: true, usingEnvironmentId: true}
+}')"
+```
+
+The `clientSideAvailability` block is what makes mobile (and JS) clients see the flag - without it the mobile-side `sse:flag-update` metric will never populate.
+
+The token used to run that command (or run it from the LaunchDarkly UI manually) needs `createFlag` on `proj/<your_project>:env/*:flag/locust-heartbeat`. The token policy in [Locust API token policy](#locust-api-token-policy) below already grants this, so you can use the same service token for both bootstrapping the flag and running the heartbeat thread.
 
 
 ## Modify locustfile.py
 
-First off, take a look at `launchdarkly_locust.py`, this file defines the `LaunchDarklyLocust` and `LaunchDarklyMobileLocust` classes that you will be basing your locusts on.
+Take a look at `launchdarkly_locust.py`. It defines `LaunchDarklyLocust` and `LaunchDarklyMobileLocust`, the two `User` base classes that you will subclass.
 
-Now open up `locustfile.py`. You'll see a couple of task sets and locusts that you can modify. Simply edit the task sets to emulate the behavior of your users. The example ones just initialize the client and evaluate random flags.
+Open `locustfile.py`. You'll see two `SequentialTaskSet` classes and two `User` subclasses. Edit them to emulate the behavior of your real users. The example task sets initialize a client and then evaluate random flags, occasionally calling `track`/`identify`.
 
-If you want to modify the client settings, just set the properties you'd normally pass to `LDClient.Config` as properties on the `LaunchDarklyBasicServer` and `LaunchDarklyBasicMobile` classes.
+Pass extra `Config` arguments to the underlying `LDClient` (server) by setting `config_overrides` on your subclass:
 
-Feel free to create as many new task sets and locust subclasses as you want to define different classes of users and behavior. You can define what percentage of users will use each behavior using the `weight` property on the locust class or task sets.
+```python
+class MyServerLoad(LaunchDarklyLocust):
+    tasks = [LaunchDarklyServerTaskSet]
+    config_overrides = {"evaluation_reasons": True}
+```
 
-For more information, [read this guide](https://docs.locust.io/en/stable/writing-a-locustfile.html)
+For mobile users override individual class attributes (`evaluation_reasons`, `send_events`, etc.) - the mobile emulator does not use the server `Config` object.
+
+Locust uses `weight` on each `User` subclass to control the population mix. See the [Locust docs](https://docs.locust.io/en/stable/writing-a-locustfile.html) for more.
 
 
 ## Setup your environment variables
 
-Configure your environment variables like so:
-
 ```
-LAUNCHDARKLY_MOBILE_KEY=mob-xxxx
 LAUNCHDARKLY_SDK_KEY=sdk-xxxx
-LAUNCHDARKLY_HEARTBEAT_PROJECT=my-proj-key
-LAUNCHDARKLY_HEARTBEAT_API_KEY=api-xxxx
+LAUNCHDARKLY_MOBILE_KEY=mob-xxxx
 LAUNCHDARKLY_BASE_URI=http://ldrelay:8030
 LAUNCHDARKLY_EVENTS_URI=http://ldrelay:8030
 LAUNCHDARKLY_STREAM_URI=http://ldrelay:8030
 LAUNCHDARKLY_MOBILE_STREAM_URI=http://ldrelay:8030
+
+# Optional - enables flag-update propagation timings
+LAUNCHDARKLY_HEARTBEAT_PROJECT=my-proj-key
+LAUNCHDARKLY_HEARTBEAT_API_KEY=api-xxxx
 ```
 
-You can also set the `sdk_key` properties on each locust class instead:
+You can also set the `sdk_key` attribute on each subclass instead of the env var:
 
 ```python
-
 class MyLocust(LaunchDarklyMobileLocust):
-  sdk_key="mob-xxx"
-  # or use a different environment variable
-  sdk_key=os.environ.get('SOME_OTHER_ENV')
+    sdk_key = "mob-xxx"
+    # or use a different environment variable
+    sdk_key = os.environ.get('SOME_OTHER_ENV')
 ```
 
 
 ## Running the tests
 
-- Run locust with `python3 -m locust -f locustfile.py`
-- Open `https://localhost:8089` and enter your desired users and set the host to your instance of LD-Relay
+- Run locust with `python -m locust -f locust/locustfile.py`
+- Open `http://localhost:8089` and enter your desired user count and host (your LD-Relay instance).
 
 ## Running in Docker
 
-```
+```sh
 docker build -t locust-ld-relay .
 docker run -p 8089:8089/tcp -e TARGET_URL=http://ldrelay:8030 --env-file=env locust-ld-relay:latest
 ```
 
-### Connecting to remote machine from the Docker container 
-Use `--add-host` to update the container `/etc/hosts` hostname mapping
-1. Run the command.
+### Connecting to a remote machine from the Docker container
+Use `--add-host` to update the container's `/etc/hosts`:
+
+```sh
+docker run -p 8089:8089/tcp \
+  --add-host="ldrelay:100.x.x.x" \
+  -e TARGET_URL=http://ldrelay:8030 \
+  --env-file=env \
+  locust-ld-relay:latest
 ```
- docker run -p 8089:8089/tcp \
-   --add-host="ldrelay:100.x.x.x" \
-   -e TARGET_URL=http://ldrelay:8030 \
-   --env-file=env \
-  locust-ld-relay:latest \
-```
 
 
-### Connecting to host machine from the Docker container 
->**NOTE:**  Required version >= 18.0.3
+### Connecting to the host machine from the Docker container
+> **NOTE:** Requires Docker >= 20.10
 
-1. Configure your env file, to use the following URI
+Configure your env file to use `host.docker.internal`:
 
 ```
-....
-
 LAUNCHDARKLY_BASE_URI=http://host.docker.internal:8030
 LAUNCHDARKLY_EVENTS_URI=http://host.docker.internal:8030
 LAUNCHDARKLY_STREAM_URI=http://host.docker.internal:8030
 LAUNCHDARKLY_MOBILE_STREAM_URI=http://host.docker.internal:8030
-
 ```
 
-2. Run the command.
-```
- docker run -p 8089:8089/tcp \
-   --add-host=host.docker.internal:host-gateway \
-   -e TARGET_URL=http://host.docker.internal:8030 \
-   --env-file=env \
-  locust-ld-relay:latest \
+Then:
+
+```sh
+docker run -p 8089:8089/tcp \
+  --add-host=host.docker.internal:host-gateway \
+  -e TARGET_URL=http://host.docker.internal:8030 \
+  --env-file=env \
+  locust-ld-relay:latest
 ```
 
 ## Locally testing with Docker compose
 
-A simple `docker-compose.yml` is provided for local testing. This is the quickest way to get started, however it will not likely be wholly representative of your infrastructure. To get started set the required environment variables `LAUNCHDARKLY_SDK_KEY`, and `LAUNCHDARKLY_MOBILE_KEY`. The variables `LAUNCHDARKLY_HEARTBEAT_PROJECT`, and ` LAUNCHDARKLY_HEARTBEAT_API_KEY` are supported but optional.
+A simple `docker-compose.yml` is provided for local testing. Set `LAUNCHDARKLY_SDK_KEY` and `LAUNCHDARKLY_MOBILE_KEY` (and optionally the heartbeat vars), then:
 
-Once your environment is configured run `docker-compose up`, and connect to `http://localhost:8089` in your browser.
+```sh
+docker compose up --build
+```
 
-## Running in Distributed mode
+and connect to `http://localhost:8089`.
 
-You can test with large amounts of users by using multiple locust nodes. Simply configure the masters and slaves with the following env variables:
+## Running in distributed mode
+
+Locust 2.x renamed the slave role to **worker**. To run distributed:
 
 ### Master
-
 ```
-LOCUST_MODE=master
+LOCUST_MODE_MASTER=true
 ```
+Expose port 5557 from the master to your workers.
 
-Be sure to expose port 5557-55578 to your slave nodes
-
-### Slaves
-
+### Workers
 ```
-LOCUST_MODE=slave
-LOCUST_MASTER_HOST=<hostname of master>
+LOCUST_MODE_WORKER=true
+LOCUST_MASTER_NODE_HOST=<hostname of master>
 ```
 
-For more information, refer to [Locust Documentation](https://docs.locust.io/en/stable/running-distributed.html)
+See the [Locust distributed-mode docs](https://docs.locust.io/en/stable/running-distributed.html) for details.
 
 
 ## FAQ
 
 ### Why is the RPS so low?
 
-Users don't equate to requests in Locust. The number of users is the number of instances of the Locust classes defined in your locustfile. It will make as many requests as they make while running.
+Users in Locust are not requests; they are concurrent virtual clients executing the task tree. Each LD client makes a streaming connection plus periodic eval/track requests, so a few hundred users may produce only a handful of REST requests per second but many thousands of in-flight SSE connections.
 
 
-# Additional Metrics
+# Additional metrics
 
-You can get additional metrics from LD-Relay using the prometheus support in LD-Relay along with the prometheus node exporter.
+You can get additional metrics from LD-Relay using its built-in Prometheus support along with the Prometheus node exporter.
 
-You can also import stats from Locust into prometheus using [this exporter](https://github.com/ilsken/locust_exporter) which is also available on docker hub under [tarqld/locust_exporter](https://hub.docker.com/r/tarqld/locust_exporter)
+You can also export Locust stats to Prometheus via [this exporter](https://github.com/ilsken/locust_exporter), available on Docker Hub as [tarqld/locust_exporter](https://hub.docker.com/r/tarqld/locust_exporter).
 
 
-# Locust Api Token Policy
+# Locust API token policy
 
-Below is an inline policy that would allow the token you generate to update the `locust-heartbeat` flag in any of your projects
+The flag-propagation metric (`sse:flag-update`) is driven by the master process PATCHing the `locust-heartbeat` flag every 30 seconds. The token attached to that PATCH (`LAUNCHDARKLY_HEARTBEAT_API_KEY`) needs the policy below. It allows the master to (a) create the flag if it doesn't yet exist, (b) update its variation values, (c) bypass any required-approval workflow on those updates, and (d) read project metadata (LaunchDarkly now requires `viewProject` to do anything project-scoped).
 
-```
+```json
 [
   {
     "resources": [
       "proj/*:env/*:flag/locust-heartbeat"
     ],
     "actions": [
-      "updateFlagVariations"
+      "createFlag",
+      "updateFlagVariations",
+      "bypassRequiredApproval"
+    ],
+    "effect": "allow"
+  },
+  {
+    "resources": [
+      "proj/*"
+    ],
+    "actions": [
+      "viewProject"
     ],
     "effect": "allow"
   }
 ]
 ```
+
+## Provisioning the role and token with `ldcli`
+
+You can attach the policy directly to a service token (no custom role required) — the heartbeat thread just needs *a* token with that policy. The two paths below assume you've already run `ldcli login` with an account-admin token.
+
+### Option A: inline policy on a service token (simplest)
+
+```sh
+POLICY=$(cat <<'EOF'
+[
+  {
+    "resources": ["proj/*:env/*:flag/locust-heartbeat"],
+    "actions": ["createFlag", "updateFlagVariations", "bypassRequiredApproval"],
+    "effect": "allow"
+  },
+  {
+    "resources": ["proj/*"],
+    "actions": ["viewProject"],
+    "effect": "allow"
+  }
+]
+EOF
+)
+
+ldcli access-tokens create -ojson --data "$(jq -n --argjson policy "$POLICY" '{
+  name: "locust-heartbeat",
+  serviceToken: true,
+  inlineRole: $policy
+}')" | jq -r '.token'
+```
+
+The printed string is the bearer token — copy it into `LAUNCHDARKLY_HEARTBEAT_API_KEY`. (LaunchDarkly only reveals the value once; rotate via `ldcli access-tokens reset`.)
+
+### Option B: reusable custom role + service token
+
+Use this if you want multiple tokens (e.g. across teams) to share the same permissions, or you want the policy editable in the LaunchDarkly UI.
+
+```sh
+# 1. Create the custom role and capture its _id (customRoleIds takes the
+#    opaque _id, not the human-readable key).
+ROLE_ID=$(ldcli custom-roles create -ojson --data "$(jq -n '{
+  key: "locust-heartbeat",
+  name: "Locust Heartbeat",
+  description: "Allows the locust load tester to drive the locust-heartbeat flag.",
+  policy: [
+    {
+      resources: ["proj/*:env/*:flag/locust-heartbeat"],
+      actions:   ["createFlag", "updateFlagVariations", "bypassRequiredApproval"],
+      effect:    "allow"
+    },
+    {
+      resources: ["proj/*"],
+      actions:   ["viewProject"],
+      effect:    "allow"
+    }
+  ]
+}')" | jq -r '._id')
+
+# 2. Issue a service token bound to that role
+ldcli access-tokens create -ojson --data "$(jq -n --arg id "$ROLE_ID" '{
+  name: "locust-heartbeat",
+  serviceToken: true,
+  customRoleIds: [$id]
+}')" | jq -r '.token'
+```
+
+> **Note:** custom roles are an Enterprise feature. If your account doesn't have them, use Option A.
+
+The heartbeat thread will pick the token up from `LAUNCHDARKLY_HEARTBEAT_API_KEY` on its next 30-second tick.

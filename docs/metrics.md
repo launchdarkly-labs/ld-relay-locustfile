@@ -1,64 +1,63 @@
 # Key metrics
 
-This load test surfaces four LaunchDarkly-specific metrics into the standard Locust stats panel. Each row in the panel has the same shape Locust uses for HTTP requests (`# reqs`, `# fails`, `Med`, `95%`, `Avg`, `Min`, `Max`, `req/s`), so all of the usual aggregations (response-time charts, percentiles, failure breakdowns, distributed-mode aggregation, exporters like [`locust_exporter`](https://github.com/ilsken/locust_exporter)) work without further configuration.
+## 1. Initialization Latency
 
-Metrics are emitted separately for the **server** SDK and the **mobile** emulator, so you can compare relay performance against the two SDK families under the same load.
+This metric measures how long an SDK spends in its "not yet initialized" window. While the SDK is in this state, `variation()` calls return defaults rather than real flag values, so high initialization latency translates directly into user-visible incorrect flag evaluations on app cold start.
 
-## 1. Throughput (`req/s`)
+This table shows the rows the package emits:
 
-| Where | What |
-|---|---|
-| **Locust header** | `Total RPS` (and per-row `req/s` columns) |
-
-Locust's headline number. Counts every request the load test issues - SSE connect attempts, polling fetches, event POSTs, the heartbeat PATCH, and every synthetic LD-specific metric below. Useful as the macro-level signal: if RPS drops while user count stays flat, something is blocking somewhere downstream.
-
-## 2. Initialization Latency
-
-| Where | What |
+| Row | What it measures |
 |---|---|
 | `ld:init server` | Time from server `LDClient` construction to first successful `put` from the streaming endpoint. |
-| `ld:init mobile` | Time from `MobileLDClient` construction to first successful `put` (or polling fallback after a `ping`). |
+| `ld:init mobile` | Time from `MobileLDClient` construction to the first `put` over `/meval`. |
 
-Measures how long an SDK spends in its "not yet initialized" window. While the SDK is in this state, `variation()` calls return defaults rather than real flag values, so high initialization latency directly translates to user-visible incorrect flag evaluations on app cold-start.
+The clock starts when the client object is created and stops the moment the SDK transitions to `is_initialized() == True`. For both server and mobile, this covers the time from client construction to the first `put` event arriving over the streaming connection.
 
-The clock starts when the client object is created and stops the moment the SDK transitions to `is_initialized() == True`. For the server SDK this is the round-trip `client → relay → SSE put`. For the mobile emulator it's `client → relay → SSE put` *or* `client → relay → SSE ping → relay → polling response` depending on how relay decides to fan out the initial state.
+## 2. Update Propagation Latency
 
-## 3. Update Propagation Latency
+This metric measures wall-clock time between a flag change at LaunchDarkly and the moment a connected SDK observes that change. **It is the right metric to track when measuring user impact of flag changes**, because it is the latency a real user experiences between "SDK admin saves a change" and "production traffic sees the new value."
 
-| Where | What |
+This table shows the rows the package emits:
+
+| Row | What it measures |
 |---|---|
 | `sse:flag-update server` | Wall-clock delta from when LaunchDarkly accepts a flag-variation PATCH to when the server SDK observes the resulting `patch` event over its streaming connection. |
-| `sse:flag-update mobile` | Same, for the mobile streaming endpoint (`/meval`). |
+| `sse:flag-update mobile` | The same delta, measured on the mobile streaming endpoint `/meval`. |
 
-The measurement loop:
+The measurement loop runs as follows:
 
-1. The Locust master spawns a background thread (`enable_flag_propagation_metric()` in [`ld_locust/heartbeat.py`](../locust/ld_locust/heartbeat.py)) that PATCHes the `locust-heartbeat` flag every 30 seconds, writing the current epoch-millisecond clock into the variation values.
-2. LaunchDarkly accepts the PATCH and propagates it to the relay's upstream stream.
-3. Relay forwards the patch to every connected SDK over its `/all` (server) and `/meval` (mobile) SSE streams.
-4. Our instrumented SDKs read the embedded timestamp out of the patch, subtract from the receive-time clock, and emit that delta as the metric.
+1. The Locust master spawns a background thread, `enable_flag_propagation_metric()` in [`ld_locust/heartbeat.py`](../locust/ld_locust/heartbeat.py). The thread PATCHes the `locust-heartbeat` flag every 30 seconds, writing the current epoch-millisecond clock into the variation values.
+2. The instrumented SDKs receive the resulting `patch` event over their streaming connection, read the embedded timestamp, subtract it from the receive-time clock, and emit that delta as the metric.
 
-This is end-to-end propagation: it covers LD ingest, LD edge fan-out, network to relay, relay's own SSE multiplexing, network to client, and client-side stream parsing. **It is the right metric to track when measuring user impact of flag changes**, because it's the latency a real user experiences between "SDK admin clicks Save" and "production traffic sees the new value."
+This is end-to-end propagation, measured between the PATCH at LaunchDarkly's admin API and the SDK observing the change at the client.
 
-The `locust-heartbeat` flag and its bootstrap policy are documented in the project [README](../README.md#optional-configure-a-flag-heartbeat). Without that flag and its API token, this metric row simply doesn't appear (the test still runs).
+The `locust-heartbeat` flag and its bootstrap policy are documented in the project [README](../README.md#optional-configure-a-flag-heartbeat). Without that flag and its API token, this metric row does not appear. The test still runs.
 
-## 4. Evaluation Latency
+## 3. Evaluation Latency
 
-| Where | What |
+This metric is mostly relevant when the data path is **not** an in-process memory lookup. Two configurations make it interesting:
+
+- **Daemon mode**, set via `use_ldd=True`. The SDK reads from a persistent store such as Redis or DynamoDB instead of caching flags itself.
+- **Persistent feature store** for backup and cold start.
+
+In default streaming mode, `variation()` is a hash-map lookup. This metric reads sub-millisecond and is uninteresting.
+
+This table shows the rows the package emits:
+
+| Row | What it measures |
 |---|---|
-| `ld:eval server.variation` / `ld:eval server.variation_detail` | Wall-clock duration of a single `LDClient.variation()` / `variation_detail()` call. |
-| `ld:eval mobile.variation` / `ld:eval mobile.variation_detail` | Same, for the mobile emulator. |
+| `ld:eval server.variation` | Wall-clock duration of a single `LDClient.variation()` call. |
+| `ld:eval server.variation_detail` | Wall-clock duration of a single `LDClient.variation_detail()` call. |
+| `ld:eval mobile.variation` | The same, for the mobile emulator. |
+| `ld:eval mobile.variation_detail` | The same, for the mobile emulator. |
 
-Mostly relevant when the data path is **not** an in-process memory lookup - i.e. **daemon mode** (`use_ldd=True`, where the SDK reads from a persistent store like Redis or DynamoDB instead of caching flags itself) or a **persistent feature store** for backup/cold-start. In default streaming mode, `variation()` is a hash-map lookup and this metric will be sub-millisecond and uninteresting.
+The server-side measurement uses a real `ldclient.Hook`, named `_EvalLatencyHook` in [`ld_locust/server.py`](../locust/ld_locust/server.py). It captures every code path through `variation`, `variation_detail`, and `migration_variation` uniformly, including any future hook stages added by the SDK.
 
-The server-side measurement is implemented as a real `ldclient.Hook` (`_EvalLatencyHook` in [`ld_locust/server.py`](../locust/ld_locust/server.py)), so it captures every code path through `variation`/`variation_detail`/`migration_variation` uniformly, including any future hook stages added by the SDK.
-
-The mobile-side measurement wraps `MobileLDClient.variation*` directly. Mobile flag evaluation is always an in-memory lookup against the pre-evaluated flag store, so this row will typically read 0&nbsp;ms.
-
----
+The mobile-side measurement wraps `MobileLDClient.variation*` directly. Mobile flag evaluation is always an in-memory lookup against the pre-evaluated flag store, so this row typically reads 0&nbsp;ms.
 
 ## Reading the panel
 
-A healthy Locust panel during a load test looks roughly like this (truncated):
+A healthy Locust panel during a load test looks roughly like the following truncated view:
 
 ```
 type            name                                                         reqs   fails   avg_ms
@@ -78,4 +77,4 @@ ld:eval         server.variation                                                
 ld:eval         mobile.variation                                                N        0      ~0 ms
 ```
 
-Rows that don't begin with `ld:` or `sse:flag-update` are real network requests - see [`endpoints.md`](endpoints.md) for what each one means and how relay handles it.
+To learn more about these requests, read [`endpoints.md`](endpoints.md).

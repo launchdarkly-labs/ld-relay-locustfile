@@ -157,7 +157,7 @@ and connect to `http://localhost:8089`.
 
 ## Running in distributed mode
 
-Locust 2.x renamed the slave role to **worker**. To run distributed:
+To run distributed:
 
 ### Master
 ```
@@ -179,6 +179,24 @@ See the [Locust distributed-mode docs](https://docs.locust.io/en/stable/running-
 ### Why is the RPS so low?
 
 Users in Locust are not requests; they are concurrent virtual clients executing the task tree. Each LD client makes a streaming connection plus periodic eval/track requests, so a few hundred users may produce only a handful of REST requests per second but many thousands of in-flight SSE connections.
+
+
+## Development
+
+Dev tooling is pinned in [`mise.toml`](mise.toml) (`pre-commit`, `ruff`, `ldcli`). With [mise](https://mise.jdx.dev/) installed, one-time setup is:
+
+```sh
+mise install                    # bootstrap pre-commit, ruff, ldcli
+pre-commit install              # enable the git hook
+```
+
+Lints + formatting are wired up via [pre-commit](https://pre-commit.com/) with [ruff](https://docs.astral.sh/ruff/) and [shellcheck](https://www.shellcheck.net/) - they run automatically on every `git commit`. To run them manually across the whole tree:
+
+```sh
+pre-commit run --all-files
+```
+
+If you'd rather not use mise, `pip install pre-commit` followed by `pre-commit install` works the same. The same hooks run in CI on pushes and PRs (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)), alongside a `docker build` smoke test.
 
 
 # LaunchDarkly metrics

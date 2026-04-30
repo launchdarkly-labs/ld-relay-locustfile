@@ -25,8 +25,8 @@ from locust import SequentialTaskSet, TaskSet, between, task
 log = logging.getLogger(__name__)
 
 
-# Optionally pull config from a JSON file (handy for terraform/cloudinit
-# provisioning); env vars set elsewhere always win.
+# Optional JSON config file for terraform/cloud-init provisioning. Existing
+# env vars take precedence (`setdefault` semantics).
 try:
     with open(os.environ.get("LD_ENV_FILE", "/etc/ldlocust.json")) as fp:
         for k, v in json.load(fp).items():
@@ -76,8 +76,8 @@ class LaunchDarklyMobileTaskSet(SequentialTaskSet):
 
     @task
     def disconnect(self) -> None:
-        # End the session and let the locust loop back to init - simulates a
-        # user dropping in and out of network connectivity.
+        # Ends the session so the SequentialTaskSet loops back to init,
+        # simulating intermittent connectivity.
         self.user.close_client()
 
     def on_stop(self) -> None:
@@ -130,19 +130,17 @@ class LaunchDarklyServerTaskSet(SequentialTaskSet):
 class LaunchDarklyBasicServer(LaunchDarklyLocust):
     tasks = [LaunchDarklyServerTaskSet]
     weight = 1
-    # Send analytics events so /bulk + /diagnostic traffic is exercised. Drop
-    # to False if you're pointing this at a production project and don't want
-    # synthetic events polluting your data.
+    # Set to False when pointing at a production project to keep synthetic
+    # events out of your real analytics.
     send_events = True
 
 
 class LaunchDarklyBasicMobile(LaunchDarklyMobileLocust):
     tasks = [LaunchDarklyMobileTaskSet]
     weight = 2
-    # Same rationale; mobile events go to /mobile/events/{bulk,diagnostic}.
     send_events = True
 
 
-# Opt in to the locust-heartbeat flag-propagation metric. Requires
-# LAUNCHDARKLY_HEARTBEAT_PROJECT and LAUNCHDARKLY_HEARTBEAT_API_KEY in the env.
+# No-op unless LAUNCHDARKLY_HEARTBEAT_PROJECT and LAUNCHDARKLY_HEARTBEAT_API_KEY
+# are set in the env.
 enable_flag_propagation_metric()

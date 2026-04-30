@@ -1,26 +1,17 @@
 """LaunchDarkly mobile/client-side load emulator.
 
-Strategy: replace only the *surface* the Python SDK doesn't model (the mobile
-streaming/polling/events URLs, the ``api_key`` auth prefix, the absence of
-index events) and reuse ``ldclient`` machinery for everything else - event
-buffering, summary aggregation, debug-event windowing, anonymous-attribute
-redaction, private-attribute filtering, sampling, gzip, retries, payload-id
-headers, diagnostic init/stats, and so on.
+The Python SDK is a server-side SDK, so this module overrides the surface
+where mobile differs and reuses ``ldclient`` for the rest. Wire reference is
+the iOS client SDK at ``reference/ios-client-sdk``. Mobile-vs-server deltas:
 
-The reference for mobile wire behavior is the iOS client SDK at
-``reference/ios-client-sdk``. Notable points where mobile differs from the
-Python *server* SDK:
-
-- ``Authorization: api_key <mobileKey>`` (server uses the raw key)
-- events POST to ``/mobile/events/bulk``; diagnostics POST to
-  ``/mobile/events/diagnostic`` (server uses ``/bulk`` and ``/diagnostic``)
+- ``Authorization: api_key <mobileKey>`` (server sends the raw key)
+- events POST to ``/mobile/events/{bulk,diagnostic}``
 - streaming endpoint ``/meval/{base64(context)}``; polling fallback
   ``/msdk/evalx/contexts/{base64(context)}``
-- mobile SDKs do **not** emit index events
-- mobile flag payloads carry an evaluated ``value`` plus ``flagVersion``
-  (used as ``versionForEvents``), ``trackEvents``, ``debugEventsUntilDate``,
-  ``trackReason`` - they are not full flag definitions, so the standard
-  evaluator cannot run on them
+- no index events
+- flag payloads are pre-evaluated (``value`` + ``flagVersion``,
+  ``trackEvents``, ``debugEventsUntilDate``, ``trackReason``) rather than full
+  flag definitions, so the upstream evaluator can't run on them
 """
 
 from __future__ import annotations
@@ -115,17 +106,13 @@ def _eval_latency_metric(method: str) -> Iterator[None]:
 
 
 class MobileConfig(Config):
-    """Config for the mobile emulator.
+    """Config overrides so the upstream event processor talks mobile URLs.
 
-    Differences from a vanilla server ``Config``:
-
-    - ``sdk_key`` returns ``api_key <key>`` so every request the SDK sends gets
-      the mobile-style auth prefix. The bare key is still validated/stored
-      under ``Config.__sdk_key``.
-    - ``events_base_uri`` carries ``/mobile/events`` so the SDK's hardcoded
-      ``+ /bulk`` and ``+ /diagnostic`` suffixes land on the right paths.
-    - default ``flush_interval`` / ``events_max_pending`` /
-      ``diagnostic_recording_interval`` match iOS.
+    - ``sdk_key`` returns ``api_key <key>`` (the raw key is still stored on the
+      base ``Config`` so its own validation is happy).
+    - ``events_base_uri`` is suffixed with ``/mobile/events`` so the SDK's
+      hardcoded ``+ /bulk`` / ``+ /diagnostic`` lands on the mobile paths.
+    - default flush/capacity/diagnostic-interval values track iOS.
     """
 
     def __init__(
@@ -150,7 +137,6 @@ class MobileConfig(Config):
 
     @property
     def sdk_key(self) -> str | None:  # type: ignore[override]
-        # Mobile SDKs send Authorization: api_key <mobileKey>
         raw = self._mobile_key
         return f"api_key {raw}" if raw else ""
 
@@ -216,19 +202,14 @@ class _FlagStore:
 
 
 class _FlagProxy:
-    """Adapter from a mobile-flag-state dict to the ``FeatureFlag``-shaped
-    surface the SDK's event processor expects.
+    """Duck-types ``ldclient.impl.model.FeatureFlag`` against a mobile flag dict.
 
-    Read paths in the SDK:
-    - ``flag.version`` (event payload, summarizer counter key)
-    - ``flag.track_events`` (gates feature events)
-    - ``flag.track_events_fallthrough`` (``EventFactory.is_experiment``)
-    - ``flag.debug_events_until_date`` (gates debug events)
-    - ``flag.sampling_ratio`` / ``flag.exclude_from_summaries`` (event sampling)
-    - ``flag.rules[i].track_events`` (``EventFactory.is_experiment``)
-
-    For mobile, ``versionForEvents = flagVersion ?? version`` - we surface that
-    via ``version`` so the emitted event has the mobile-correct value.
+    The upstream event processor reads ``version``, ``track_events``,
+    ``track_events_fallthrough``, ``debug_events_until_date``,
+    ``sampling_ratio``, ``exclude_from_summaries``, and ``rules[i].track_events``.
+    Mobile payloads carry no rules, and ``versionForEvents = flagVersion ??
+    version`` - we surface that resolved value as ``version`` so the emitted
+    event matches what an iOS SDK would send.
     """
 
     __slots__ = (
@@ -244,18 +225,17 @@ class _FlagProxy:
 
     def __init__(self, flag: dict[str, Any]) -> None:
         self.key = flag.get("key", "")
-        # versionForEvents semantics
         self.version = flag.get("flagVersion") or flag.get("version") or 0
         self.track_events = bool(flag.get("trackEvents"))
         self.track_events_fallthrough = bool(flag.get("trackReason"))
         self.debug_events_until_date = flag.get("debugEventsUntilDate")
         self.sampling_ratio = flag.get("samplingRatio") or 1
         self.exclude_from_summaries = bool(flag.get("excludeFromSummaries"))
-        self.rules: list = []  # mobile payloads do not carry rules
+        self.rules: list = []
 
 
 class _MobileEventDispatcher(EventDispatcher):
-    """``EventDispatcher`` minus index events (mobile SDKs don't emit them)."""
+    """``EventDispatcher`` with index events suppressed."""
 
     def _get_indexable_context(self, event, block) -> None:  # type: ignore[override]
         return None
@@ -298,9 +278,9 @@ class _MobileFeatureRequester:
 class MobileLDClient:
     """Mobile/client-side LaunchDarkly load emulator.
 
-    Public surface mirrors the official mobile SDKs as closely as feasible:
-    ``variation``, ``variation_detail``, ``all_flags_state``, ``identify``,
-    ``track``, ``flush``, ``close``, ``is_initialized``.
+    Public surface matches the official mobile SDKs: ``variation``,
+    ``variation_detail``, ``all_flags_state``, ``identify``, ``track``,
+    ``flush``, ``close``, ``is_initialized``.
     """
 
     def __init__(
@@ -332,7 +312,7 @@ class MobileLDClient:
             raise ValueError("sdk_key is required for the mobile client")
 
         self._context = context
-        self._sdk_key = sdk_key  # raw key, no prefix
+        self._sdk_key = sdk_key
         self._base_uri = base_uri.rstrip("/")
         self._stream_uri = stream_uri.rstrip("/")
         self._evaluation_reasons = evaluation_reasons
@@ -368,11 +348,6 @@ class MobileLDClient:
         self._event_factory_default = EventFactory(False)
         self._event_factory_with_reasons = EventFactory(True)
 
-        # Use the upstream DefaultEventProcessor (via LocustEventDispatcher's
-        # instrumented HTTP wrapper) but parameterized with our index-event-
-        # suppressing dispatcher subclass. That alone covers summary, debug,
-        # sampling, gzip, retries, payload-id headers, and diagnostic init/
-        # stats - we own only the mobile-specific deltas.
         self._diagnostic_accumulator: _DiagnosticAccumulator | None = None
         self._event_processor = None
         if send_events:
@@ -389,6 +364,7 @@ class MobileLDClient:
         self._sse: SSEClient | None = None
         self._stream_uri_full = self._build_stream_uri()
         self._init_started_at = 0.0
+        self._last_heartbeat_value: int | None = None
 
         self._stream_thread = threading.Thread(target=self._run_stream, name="ld-mobile-stream", daemon=True)
         self._stream_thread.start()
@@ -460,10 +436,8 @@ class MobileLDClient:
         variation = flag_dict.get("variation")
         reason = flag_dict.get("reason")
 
-        # The upstream evaluator can't run against mobile flag-state payloads
-        # (no rules/segments), so we hand-roll an EventInputEvaluation. The
-        # rest - summary aggregation, feature/debug gating, sampling, output
-        # formatting - happens downstream in the event processor.
+        # Mobile flag payloads have no rules/segments, so the upstream
+        # evaluator can't produce the EventInputEvaluation - we hand-roll it.
         track_events = flag.track_events or (factory.is_experiment(flag, reason) if reason else False)
         if self._event_processor is not None:
             include_reason = factory._with_reasons or track_events  # type: ignore[attr-defined]
@@ -559,11 +533,13 @@ class MobileLDClient:
         if msg.event == "put":
             data = json.loads(msg.data) if msg.data else {}
             self._store.init(data)
+            self._observe_heartbeat(data.get(HEARTBEAT_FLAG_KEY))
             self._mark_ready(len(msg.data or ""))
         elif msg.event == "patch":
             payload = json.loads(msg.data)
             self._store.upsert(payload)
-            self._record_flag_update_metric(payload)
+            if payload.get("key") == HEARTBEAT_FLAG_KEY:
+                self._observe_heartbeat(payload)
         elif msg.event == "delete":
             payload = json.loads(msg.data)
             key = payload.get("key")
@@ -574,6 +550,7 @@ class MobileLDClient:
             try:
                 data = self._requester.get_all(self._context)
                 self._store.init(data)
+                self._observe_heartbeat(data.get(HEARTBEAT_FLAG_KEY))
                 self._mark_ready(0)
             except Exception:
                 log.exception("ping fetch failed")
@@ -595,15 +572,26 @@ class MobileLDClient:
         )
         self._ready.set()
 
-    @staticmethod
-    def _record_flag_update_metric(payload: dict[str, Any]) -> None:
-        if payload.get("key") != HEARTBEAT_FLAG_KEY:
+    def _observe_heartbeat(self, flag: dict[str, Any] | None) -> None:
+        # Records a propagation-latency sample whenever a fresh heartbeat
+        # value reaches us. Works for any path that surfaces the flag value:
+        # streaming `patch`, the polling response after a `ping`, and any
+        # future polling-only mode. The first observation seeds without
+        # emitting (the SDK didn't observe a real propagation, just whatever
+        # value was current at connect-time).
+        if not flag:
             return
         try:
-            value = int(payload.get("value") or 0)
+            value = int(flag.get("value") or 0)
         except (TypeError, ValueError):
             return
         if value <= 0:
+            return
+        prev = self._last_heartbeat_value
+        if prev is not None and value <= prev:
+            return
+        self._last_heartbeat_value = value
+        if prev is None:
             return
         duration = int(time.time() * 1000 - value)
         locust_events.request.fire(

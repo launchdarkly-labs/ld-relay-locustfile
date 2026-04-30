@@ -1,13 +1,12 @@
-"""Optional flag-propagation timing instrumentation.
+"""Flag-propagation timing instrumentation (opt-in).
 
-If you create a flag named ``locust-heartbeat`` in your project and supply an
-API key authorized to update it, the master process will PATCH the flag's
-variations every 30 seconds with the current millisecond clock. Each emulated
-client records the receive-time of that patch on the wire and emits it as an
-``sse:flag-update`` Locust metric, giving you a real measurement of LaunchDarkly
--> Relay -> client propagation latency.
+Given a ``locust-heartbeat`` flag and an API key that can update it, the
+master process PATCHes the flag's variations every 30s with the current epoch
+millis. Each emulated client subtracts that timestamp from the wire-arrival
+time and emits the delta as an ``sse:flag-update`` row, measuring
+LaunchDarkly → Relay → client propagation.
 
-Usage in your locustfile::
+Wire it up in your locustfile::
 
     from ld_locust import enable_flag_propagation_metric
     enable_flag_propagation_metric()
@@ -32,15 +31,25 @@ log = logging.getLogger(__name__)
 DEFAULT_INTERVAL_SECONDS = 30
 
 
+DEFAULT_API_BASE = "https://app.launchdarkly.com"
+
+
 def enable_flag_propagation_metric(
     *,
     project_env: str = "LAUNCHDARKLY_HEARTBEAT_PROJECT",
     api_key_env: str = "LAUNCHDARKLY_HEARTBEAT_API_KEY",
+    api_base_env: str = "LAUNCHDARKLY_API_BASE",
     flag_key: str = "locust-heartbeat",
     interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
-    api_base: str = "https://app.launchdarkly.com",
+    api_base: str | None = None,
 ) -> None:
-    """Register a Locust ``init`` listener that runs the heartbeat thread on master."""
+    """Register a Locust ``init`` listener that runs the heartbeat thread on master.
+
+    The PATCH endpoint resolves in this order: explicit ``api_base`` argument,
+    then the ``LAUNCHDARKLY_API_BASE`` env var (override ``api_base_env`` to
+    rename it), then ``https://app.launchdarkly.com``. Set the env var to
+    ``https://app.launchdarkly.us`` for federal, or to your EU region URL.
+    """
 
     @events.init.add_listener
     def _on_init(environment, **_kwargs):  # noqa: ANN001
@@ -55,7 +64,8 @@ def enable_flag_propagation_metric(
         if not api_key:
             log.warning("%s unset; flag-propagation metric disabled", api_key_env)
             return
-        gevent.spawn(_run_heartbeat, runner, proj, api_key, flag_key, interval_seconds, api_base)
+        resolved_api_base = api_base or os.environ.get(api_base_env) or DEFAULT_API_BASE
+        gevent.spawn(_run_heartbeat, runner, proj, api_key, flag_key, interval_seconds, resolved_api_base)
 
 
 def _run_heartbeat(runner, project: str, api_key: str, flag_key: str, interval_seconds: int, api_base: str) -> None:

@@ -1,13 +1,12 @@
 """Server-side LaunchDarkly user emulator.
 
-Wraps the real ``ldclient.LDClient`` and plugs in three drop-in component
-replacements that route their HTTP through our locust-instrumented pool:
+Wraps a real ``ldclient.LDClient`` with three component subclasses that route
+HTTP through the Locust-instrumented pool:
 
-- :class:`LocustEventDispatcher` - Locust-aware ``DefaultEventProcessor``
-- :class:`LocustFeatureRequester` - Locust-aware polling feature requester
-- :class:`LocustStreamingProcessor` - Locust-aware streaming update processor
-  that also emits an ``sse:flag-update`` metric whenever a patch on the
-  ``locust-heartbeat`` flag is observed (used to time flag propagation).
+- :class:`LocustEventDispatcher`
+- :class:`LocustFeatureRequester`
+- :class:`LocustStreamingProcessor`, which additionally times propagation of
+  the ``locust-heartbeat`` flag.
 """
 
 from __future__ import annotations
@@ -66,11 +65,10 @@ HEARTBEAT_FLAG_KEY = "locust-heartbeat"
 class LocustEventDispatcher(DefaultEventProcessor):
     """``DefaultEventProcessor`` whose HTTP pool fires Locust ``request`` events.
 
-    Also auto-creates a ``_DiagnosticAccumulator`` when one isn't supplied and
-    ``diagnostic_opt_out`` is False. This matches what the LDClient does for
-    its own built-in dispatcher; LDClient *doesn't* do it for user-supplied
-    ``event_processor_class``, so without this we'd silently lose the
-    ``diagnostic-init`` and periodic ``diagnostic`` events on the server side.
+    Also creates a ``_DiagnosticAccumulator`` when none is supplied. LDClient
+    creates one for its built-in dispatcher but not for user-supplied
+    ``event_processor_class``, so without this the server-side
+    ``diagnostic-init`` / ``diagnostic`` events go missing.
     """
 
     def __init__(self, config, diagnostic_accumulator=None, dispatcher_class=None):
@@ -94,18 +92,15 @@ class LocustFeatureRequester(_UpstreamFeatureRequester):
 
 
 class LocustStreamingProcessor(_UpstreamStreaming):
-    """Streaming update processor that:
-
-    - routes the SSE connection through the locust-instrumented HTTP pool, so
-      stream connect/disconnect/heartbeat traffic shows in stats
-    - emits an ``sse:flag-update`` Locust request every time the
-      ``locust-heartbeat`` flag is patched, measuring server -> client
-      propagation latency
+    """Streaming update processor that routes its SSE connection through the
+    Locust-instrumented HTTP pool and emits an ``sse:flag-update`` request
+    each time the ``locust-heartbeat`` flag is patched.
     """
 
     def __init__(self, config, store, ready):
-        # Upstream signature is (config, store, ready, diagnostic_accumulator);
-        # the SDK invokes user-supplied update_processor_class with three args.
+        # The SDK invokes user-supplied update_processor_class with three args
+        # but the upstream constructor takes four (the trailing
+        # diagnostic_accumulator).
         super().__init__(config, store, ready, None)
 
     def _create_sse_client(self) -> SSEClient:
@@ -134,11 +129,9 @@ class LocustStreamingProcessor(_UpstreamStreaming):
 
     def _process_message(self, store, msg: Event) -> bool:
         result = super()._process_message(store, msg)
-        # Initialization-latency metric: fired the first time a `put` succeeds.
-        # `_ready` is set by upstream *after* this method returns when result
-        # is True, so a False there means we're still in the initial-init
-        # window. ``_connection_attempt_start_time`` is set by upstream just
-        # before iterating SSE actions.
+        # Initialization-latency metric. `_ready` is set by upstream *after*
+        # this method returns, so checking it here gates us to the first
+        # successful `put`.
         if result and not self._ready.is_set() and self._connection_attempt_start_time is not None:
             duration = int((time.time() - self._connection_attempt_start_time) * 1000)
             events.request.fire(
@@ -234,7 +227,8 @@ class LaunchDarklyLocust(User):
     base_uri: str | None = os.environ.get("LAUNCHDARKLY_BASE_URI")
     events_uri: str | None = os.environ.get("LAUNCHDARKLY_EVENTS_URI")
     stream_uri: str | None = os.environ.get("LAUNCHDARKLY_STREAM_URI")
-    # https://docs.launchdarkly.com/guides/flags/testing-code#managing-test-data-in-your-production-environment
+    # Off by default to avoid polluting prod environments with synthetic events.
+    # See https://docs.launchdarkly.com/guides/flags/testing-code#managing-test-data-in-your-production-environment
     send_events: bool = False
     config_overrides: dict = {}
 
@@ -242,6 +236,9 @@ class LaunchDarklyLocust(User):
         super().__init__(environment)
         self._ldclient: LDClient | None = None
         self._context: Context | None = None
+        # Default every URI to Locust's host (--host / LOCUST_HOST / UI input).
+        # The per-endpoint LAUNCHDARKLY_*_URI vars override this when relay,
+        # events, and stream live on different hosts.
         if not self.base_uri:
             self.base_uri = self.host
         if not self.events_uri:
@@ -258,7 +255,6 @@ class LaunchDarklyLocust(User):
             self._context = self.generate_context()
         return self._context
 
-    # Backwards-compatible alias for the legacy attribute name.
     @property
     def user(self) -> Context:
         return self.context

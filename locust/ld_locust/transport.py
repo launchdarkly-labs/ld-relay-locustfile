@@ -1,10 +1,8 @@
 """Locust-instrumented HTTP plumbing shared by the server and mobile emulators.
 
-Every outbound request the SDK or our mobile emulator makes goes through one
-of the pool managers in this module. They wrap urllib3 to fire a Locust
-``request`` event for each call (so connect/eval/event-POST traffic shows up
-in the Locust stats panel) and to redact per-context URL segments so SSE and
-flag-fetch URLs aggregate by endpoint rather than per user.
+The pool managers wrap urllib3 to fire a Locust ``request`` event per call
+and to strip per-context URL segments before reporting, so SSE and flag-fetch
+rows aggregate by endpoint instead of fragmenting per user.
 """
 
 from __future__ import annotations
@@ -36,12 +34,10 @@ def ld_headers(sdk_key: str | None, client: str = "PythonClient") -> dict:
 
 
 def mobile_headers(mobile_key: str | None, *, application_tag: str | None = None, wrapper: str | None = None) -> dict:
-    """Mobile-style request headers.
+    """Mobile-style request headers (``api_key`` Authorization prefix).
 
-    Mobile SDKs send ``Authorization: api_key <mobileKey>`` (note the
-    ``api_key`` prefix - server SDKs use the raw key). We additionally tag the
-    User-Agent so traffic from the emulator is distinguishable from real mobile
-    or server traffic on the wire.
+    The User-Agent is tagged so emulator traffic is distinguishable from real
+    mobile or server SDK traffic on the wire.
     """
     headers = {
         "Authorization": f"api_key {mobile_key or ''}",

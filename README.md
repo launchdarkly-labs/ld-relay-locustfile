@@ -181,11 +181,28 @@ See the [Locust distributed-mode docs](https://docs.locust.io/en/stable/running-
 Users in Locust are not requests; they are concurrent virtual clients executing the task tree. Each LD client makes a streaming connection plus periodic eval/track requests, so a few hundred users may produce only a handful of REST requests per second but many thousands of in-flight SSE connections.
 
 
+# LaunchDarkly metrics
+
+The package emits three LaunchDarkly-specific metrics into the standard Locust stats panel. Each appears once per side (server / mobile) so you can compare server SDK behavior with the mobile-emulator behavior under the same load:
+
+| Metric | Stat row(s) | What it measures |
+|---|---|---|
+| **Initialization Latency** | `ld:init server` / `ld:init mobile` | Time from SDK construction until the first successful `put`/`ping` reply leaves the client in an initialized state. |
+| **Update Propagation Latency** | `sse:flag-update server` / `sse:flag-update mobile` | Round-trip time from the heartbeat PATCH at LaunchDarkly through Relay to the client's SSE consumer. Driven by the `locust-heartbeat` flag (see [Configure a flag heartbeat](#optional-configure-a-flag-heartbeat)). |
+| **Evaluation Latency** | `ld:eval server.variation` / `ld:eval mobile.variation` (and `*.variation_detail`) | Time spent inside `variation()` / `variation_detail()`. Most meaningful in daemon mode or with a persistent feature store, where evaluation is no longer a pure in-memory lookup. |
+
+In addition to those, the underlying SSE/HTTP traffic shows up under its standard rows (`sse:connect`, `GET`, `POST` to `/bulk`, `/mobile/events/{bulk,diagnostic}`, etc.).
+
+For a fuller treatment - what each metric is actually measuring, how to read the panel, and what each endpoint row means - see:
+
+- **[`docs/metrics.md`](docs/metrics.md)** - the four key metrics (throughput, init, propagation, evaluation) and how to interpret them
+- **[`docs/endpoints.md`](docs/endpoints.md)** - the SDK endpoints that show up as rows in Locust, paired with [relay's own endpoint reference](https://github.com/launchdarkly/ld-relay/blob/v8/docs/endpoints.md)
+
 # Additional metrics
 
-You can get additional metrics from LD-Relay using its built-in Prometheus support along with the Prometheus node exporter.
+You can get additional metrics from LD-Relay using its built-in Prometheus support along with the Prometheus node exporter. For LD Relay v9+, you can use the built-in [OpenTelemetry export](https://github.com/launchdarkly/ld-relay/blob/v9/docs/metrics.md).
 
-You can also export Locust stats to Prometheus via [this exporter](https://github.com/ilsken/locust_exporter), available on Docker Hub as [tarqld/locust_exporter](https://hub.docker.com/r/tarqld/locust_exporter).
+You can also export Locust stats via its [OpenTelemetry integration](https://docs.locust.io/en/stable/telemetry.html).
 
 
 # Locust API token policy

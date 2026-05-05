@@ -1,3 +1,2 @@
-launchdarkly-server-sdk==6.11.3
-backoff>=1.4.3
-
+launchdarkly-server-sdk>=9.11,<10
+launchdarkly-eventsource>=1.5,<2

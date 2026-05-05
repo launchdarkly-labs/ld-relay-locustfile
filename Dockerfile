@@ -1,11 +1,9 @@
-FROM locustio/locust:0.13.5
+FROM locustio/locust:2.43.4
 
-
-
-COPY locust/ /opt/locust/
 USER root
-RUN pip install -r /opt/locust/requirements.txt
+COPY locust/ /opt/locust/
+RUN pip install --no-cache-dir -r /opt/locust/requirements.txt
 USER locust
-ENV LOCUSTFILE_PATH /opt/locust/locustfile.py
 
-
+WORKDIR /opt/locust
+ENV LOCUST_LOCUSTFILE=/opt/locust/locustfile.py

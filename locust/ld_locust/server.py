@@ -287,6 +287,27 @@ class LaunchDarklyLocust(User):
         try:
             if self._ldclient is not None:
                 self._ldclient.close()
+        except RuntimeError as exc:
+            # launchdarkly-eventsource >= 1.7.2 tears down a live stream by calling
+            # urllib3's resp.shutdown() to wake a reader blocked mid-read, and then
+            # resp.close(). That sequence assumes preemptive threads: the woken
+            # reader gets to run and drop its BufferedReader lock before the close.
+            #
+            # Locust gevent-patches the process, so the reader is a greenlet that
+            # shutdown() only makes *runnable* -- and nothing between the two calls
+            # yields, so it still holds the lock when close() runs. Since every
+            # greenlet shares one OS thread ident, CPython's buffered-IO guard sees
+            # the lock held by the current thread and raises instead of blocking:
+            # "reentrant call inside <_io.BufferedReader ...>".
+            #
+            # shutdown() has already severed the read side by that point, so the
+            # stream really is gone and no socket or greenlet leaks -- only the SDK's
+            # remaining teardown steps are skipped. Swallow it rather than let a
+            # benign close failure kill the user greenlet mid-scenario and register a
+            # spurious Locust error. Remove once the library closes gevent-safely.
+            if "reentrant call" not in str(exc):
+                raise
+            log.debug("ignoring reentrant stream close from a gevent greenlet: %s", exc)
         finally:
             self._ldclient = None
 

@@ -23,6 +23,19 @@ This is the upstream LaunchDarkly server SDK's streaming connection. The path an
 
 In Locust, this row counts **connection attempts**. A single user produces one `sse:connect` entry per reconnect.
 
+### `sse:connect http://<relay>/sdk/stream`
+
+This table summarizes the request:
+
+| Field | Value |
+|---|---|
+| SDK Type | Server SDK in data saving mode (FDv2) |
+| Method | `GET`, long-lived SSE |
+| Path | `/sdk/stream`, with a `basis=<selector>` query parameter once the SDK holds data |
+| Auth | `Authorization: <sdk_key>` |
+
+The FDv2 replacement for `/all`. It appears instead of `/all` when a server user sets `data_system`, and carries only the objects that changed since the selector the SDK sent as its basis. Reconnects reuse the selector, so a reconnect transfers changes rather than the whole environment.
+
 ### `sse:connect http://<relay>/meval/[context]`
 
 This table summarizes the request:
@@ -37,6 +50,34 @@ This table summarizes the request:
 This is the initialization/update stream used by mobile clients in streaming mode. One connection will be created per SDK instance.
 
 ## Polling fallback
+
+### `GET http://<relay>/sdk/poll`
+
+This table summarizes the request:
+
+| Field | Value |
+|---|---|
+| SDK Type | Server SDK in data saving mode (FDv2) |
+| Method | `GET` |
+| Path | `/sdk/poll`, with a `selector=<selector>` query parameter once the SDK holds data |
+| Auth | `Authorization: <sdk_key>` |
+
+Two roles in data saving mode, both on this row. As an *initializer* it fires once at client construction, and its payload is what usually satisfies `ld:init`. As a *synchronizer* it takes over when the stream is unavailable, polling every `poll_interval` seconds.
+
+A `304` response means the SDK's selector is already current and no data came back; those show as normal `GET` successes.
+
+### `GET http://<relay>/sdk/latest-all`
+
+This table summarizes the request:
+
+| Field | Value |
+|---|---|
+| SDK Type | Server SDK, FDv1 polling |
+| Method | `GET` |
+| Path | `/sdk/latest-all` |
+| Auth | `Authorization: <sdk_key>` |
+
+The FDv1 polling endpoint. In FDv1 mode it appears only if you turn streaming off. In data saving mode it appears when the environment does not serve FDv2 - the SDK is told to fall back, and the data system switches to its FDv1-compatible synchronizer. A run configured for data saving mode that shows this row instead of `/sdk/stream` is not getting FDv2: check that your account is in the Early Access Program and that relay is 9.0.0-rc.1 or later.
 
 ### `GET http://<relay>/msdk/evalx/contexts/[context]`
 
@@ -125,12 +166,13 @@ This table maps a missing row to its likely cause:
 
 | Row missing | Likely cause |
 |---|---|
-| `sse:connect /all` | No server users in the swarm. Check `LaunchDarklyBasicServer.weight`. |
+| `sse:connect /all` | No server users in the swarm, or they run in data saving mode - check `LaunchDarklyBasicServer.weight` and `data_system`. |
+| `sse:connect /sdk/stream` | `data_system` is unset (the server users are on FDv1), pinned to `"polling"`, or the environment is falling back to FDv1 - see `GET /sdk/latest-all` above. |
 | `sse:connect /meval/[context]` | No mobile users. Check `LaunchDarklyBasicMobile.weight`. |
 | `POST /bulk`, `POST /mobile/events/bulk` | `send_events = False` on the User subclass, or the swarm has not run long enough to flush. |
 | `POST /diagnostic`, `POST /mobile/events/diagnostic` | `diagnostic_opt_out = True` in your config, or the swarm tore down before the first flush. |
 | `GET /msdk/evalx/contexts/[context]` | The mobile emulator has not received a `ping` event during the run. |
-| `sse:flag-update server`, `sse:flag-update mobile` | The heartbeat thread has not fired yet. The first PATCH lands at roughly t=30s. The heartbeat token may also be missing permissions, in which case the `PATCH .../locust-heartbeat` row shows failures. |
+| `sse:flag-update server`, `sse:flag-update mobile` | The heartbeat thread has not fired yet. The first PATCH lands at roughly t=30s. The heartbeat token may also be missing permissions, in which case the `PATCH .../locust-heartbeat` row shows failures. In data saving mode this row also needs a live stream: `data_system = "polling"` does not report it. |
 | `ld:eval server.variation` | The task set has not reached its `evaluate_flags` task yet, or your `flush_interval` and wait times are squelching it. |
 
 For more details see the [relay docs](https://github.com/launchdarkly/ld-relay/blob/v8/docs/endpoints.md) and the project [README](../README.md#additional-metrics).

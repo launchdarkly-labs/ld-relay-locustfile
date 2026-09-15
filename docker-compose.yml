@@ -18,6 +18,9 @@ services:
       - LAUNCHDARKLY_MOBILE_KEY
       - LAUNCHDARKLY_HEARTBEAT_PROJECT
       - LAUNCHDARKLY_HEARTBEAT_API_KEY
+      # Optional: "default", "streaming", or "polling" to run server users in
+      # data saving mode. Needs a relay image of 9.0.0-rc.1 or later.
+      - LAUNCHDARKLY_DATA_SYSTEM
       - LOCUST_HOST=http://ldrelay:8030
     depends_on:
       - ldrelay

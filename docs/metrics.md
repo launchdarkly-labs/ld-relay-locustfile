@@ -13,6 +13,8 @@ This table shows the rows the package emits:
 
 The clock starts when the client object is created and stops the moment the SDK transitions to `is_initialized() == True`. For both server and mobile, this covers the time from client construction to the first `put` event arriving over the streaming connection.
 
+In [data saving mode](../README.md#data-saving-mode-fdv2), a server user has two data sources that can produce that first payload: the `/sdk/poll` initializer and the `/sdk/stream` synchronizer. Whichever arrives first records the sample, and the row stays at one sample per client. With the `default` preset that is normally the initializer, which is the point of the mode - the initial payload comes off a cheap poll rather than a stream handshake.
+
 ## 2. Update Propagation Latency
 
 This metric measures wall-clock time between a flag change at LaunchDarkly and the moment a connected SDK observes that change. **It is the right metric to track when measuring user impact of flag changes**, because it is the latency a real user experiences between "SDK admin saves a change" and "production traffic sees the new value."
@@ -21,7 +23,7 @@ This table shows the rows the package emits:
 
 | Row | What it measures |
 |---|---|
-| `sse:flag-update server` | Wall-clock delta from when LaunchDarkly accepts a flag-variation PATCH to when the server SDK observes the resulting `patch` event over its streaming connection. |
+| `sse:flag-update server` | Wall-clock delta from when LaunchDarkly accepts a flag-variation PATCH to when the server SDK observes the resulting `patch` event over its streaming connection. In data saving mode, the equivalent `put-object` inside a change transfer. |
 | `sse:flag-update mobile` | The same delta, measured on the mobile streaming endpoint `/meval`. |
 
 The measurement loop runs as follows:
@@ -32,6 +34,8 @@ The measurement loop runs as follows:
 This is end-to-end propagation, measured between the PATCH at LaunchDarkly's admin API and the SDK observing the change at the client.
 
 The `locust-heartbeat` flag and its bootstrap policy are documented in the project [README](../README.md#optional-configure-a-flag-heartbeat). Without that flag and its API token, this metric row does not appear. The test still runs.
+
+Only changes that arrive over a live connection count. A full data transfer - the initial payload, or a stream reconnect that starts from scratch - replays the heartbeat flag holding whatever timestamp it last had, which would otherwise register as a propagation delay of minutes. Those are skipped in both modes. In data saving mode the `polling` preset reports no `sse:flag-update` rows at all, since a poll-detected change carries the poll interval inside the measurement.
 
 ## 3. Evaluation Latency
 

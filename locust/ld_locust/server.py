@@ -7,6 +7,10 @@ HTTP through the Locust-instrumented pool:
 - :class:`LocustFeatureRequester`
 - :class:`LocustStreamingProcessor`, which additionally times propagation of
   the ``locust-heartbeat`` flag.
+
+Those last two are FDv1 components. Set ``data_system`` on the user class to
+run the FDv2 data system ("data saving mode") instead, which swaps them for
+the instrumented initializers and synchronizers in :mod:`ld_locust.datasystem`.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from ld_eventsource.config import (
     RetryDelayStrategy,
 )
 from ldclient import Config, Context, LDClient
+from ldclient.config import DataSystemConfig
 from ldclient.evaluation import EvaluationDetail
 from ldclient.hook import EvaluationSeriesContext, Hook, Metadata
 from ldclient.impl.datasource.feature_requester import (
@@ -219,6 +224,8 @@ class LaunchDarklyLocust(User):
     Subclass and assign one or more task sets to ``tasks``. Override
     :meth:`generate_context` to produce per-user contexts, and use
     ``config_overrides`` to pass extra args to the underlying ``Config``.
+    Set ``data_system`` (or :meth:`build_data_system`) to drive the relay in
+    data saving mode.
     """
 
     abstract = True
@@ -230,6 +237,9 @@ class LaunchDarklyLocust(User):
     # Off by default to avoid polluting prod environments with synthetic events.
     # See https://docs.launchdarkly.com/guides/flags/testing-code#managing-test-data-in-your-production-environment
     send_events: bool = False
+    # FDv2 data saving mode: "default", "streaming", or "polling", mirroring
+    # the ldclient.datasystem presets. Unset keeps the SDK on FDv1.
+    data_system: str | None = os.environ.get("LAUNCHDARKLY_DATA_SYSTEM") or None
     config_overrides: dict = {}
 
     def __init__(self, environment) -> None:
@@ -259,6 +269,22 @@ class LaunchDarklyLocust(User):
     def user(self) -> Context:
         return self.context
 
+    def build_data_system(self) -> DataSystemConfig | None:
+        """Return this user's FDv2 data system config, or ``None`` to stay on FDv1.
+
+        Override for a strategy the presets don't cover - a relay-first
+        synchronizer with LaunchDarkly as backup, say - using the builders in
+        :mod:`ld_locust.datasystem`.
+        """
+        if not self.data_system:
+            return None
+        # Imported lazily: that module instruments the SDK's FDv2 internals on
+        # import, and those live under ldclient.impl, outside the SDK's semver
+        # guarantees. FDv1 runs shouldn't carry either risk.
+        from . import datasystem
+
+        return datasystem.preset(self.data_system).build()
+
     def _build_config(self) -> Config:
         kwargs: dict[str, Any] = dict(
             sdk_key=self.sdk_key or "",
@@ -266,11 +292,18 @@ class LaunchDarklyLocust(User):
             events_uri=self.events_uri or "https://events.launchdarkly.com",
             stream_uri=self.stream_uri or "https://stream.launchdarkly.com",
             send_events=self.send_events,
-            update_processor_class=LocustStreamingProcessor,
             event_processor_class=LocustEventDispatcher,
-            feature_requester_class=LocustFeatureRequester,
             hooks=[_EvalLatencyHook()],
         )
+        data_system = self.build_data_system()
+        if data_system is None:
+            kwargs["update_processor_class"] = LocustStreamingProcessor
+            kwargs["feature_requester_class"] = LocustFeatureRequester
+        else:
+            # LDClient ignores update_processor_class and
+            # feature_requester_class once datasystem_config is set, so passing
+            # the FDv1 components alongside it would only mislead.
+            kwargs["datasystem_config"] = data_system
         kwargs.update(copy.deepcopy(self.config_overrides))
         return Config(**kwargs)
 

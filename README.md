@@ -66,8 +66,6 @@ The `ld_locust` package alongside `locustfile.py` defines the two `User` base cl
 - `LaunchDarklyLocust`, in [`locust/ld_locust/server.py`](locust/ld_locust/server.py).
 - `LaunchDarklyMobileLocust`, in [`locust/ld_locust/mobile.py`](locust/ld_locust/mobile.py).
 
-> **Note:** Data Saving Mode is not yet supported.
-
 The `locustfile.py` file contains two `SequentialTaskSet` classes and two `User` subclasses. The example tasks initialize a client, evaluate random flags, and occasionally call `track` and `identify`. Edit them to match your workload.
 
 To pass extra `Config` arguments to the underlying server `LDClient`, set `config_overrides` on your subclass.
@@ -79,6 +77,55 @@ class MyServerLoad(LaunchDarklyLocust):
     tasks = [LaunchDarklyServerTaskSet]
     config_overrides = {"evaluation_reasons": True}
 ```
+
+
+### Data saving mode (FDv2)
+
+Server-side users run the FDv1 flag delivery protocol by default. To drive the relay with [data saving mode](https://launchdarkly.com/docs/sdk/features/data-saving-mode) instead, set `data_system` on the subclass, or `LAUNCHDARKLY_DATA_SYSTEM` in the environment:
+
+```python
+class MyDataSavingLoad(LaunchDarklyLocust):
+    tasks = [LaunchDarklyServerTaskSet]
+    # "default" polls /sdk/poll once, then streams /sdk/stream and falls back
+    # to polling. "streaming" and "polling" pin a single mode.
+    data_system = "default"
+```
+
+This needs Relay Proxy 9.0.0-rc.1 or later, and data saving mode enabled for your account - it is an Early Access feature, so [contact LaunchDarkly](mailto:product@launchdarkly.com) to join the EAP. Without it, the SDK falls back to FDv1 on its own and the stat rows show `/sdk/latest-all` polls rather than `/sdk/stream`.
+
+The three presets mirror the SDK's own `ldclient.datasystem` presets, rebuilt on Locust-instrumented data sources so `ld:init`, `sse:flag-update`, and the per-endpoint rows keep reporting.
+
+Every source takes its host from the `Config` URIs, which default to Locust's `--host`, so all of this traffic - the poll, the stream, and the FDv1 fallback - lands on the relay under test. Nothing reaches LaunchDarkly's SaaS endpoints unless you set `base_uri` on a source yourself.
+
+For a strategy the presets don't cover, override `build_data_system()` with the builders in [`locust/ld_locust/datasystem.py`](locust/ld_locust/datasystem.py). This one streams from a primary relay and falls back to a second:
+
+```python
+from ld_locust import datasystem as lds
+
+
+class TwoRelays(LaunchDarklyLocust):
+    tasks = [LaunchDarklyServerTaskSet]
+
+    def build_data_system(self):
+        # One InitMetric shared across sources keeps each client to a single
+        # ld:init sample.
+        metric = lds.InitMetric()
+        return (
+            lds.custom()
+            .initializers([lds.polling_ds_builder(metric).base_uri("http://relay-a:8030")])
+            .synchronizers(
+                lds.streaming_ds_builder(metric).base_uri("http://relay-a:8030"),
+                lds.streaming_ds_builder(metric).base_uri("http://relay-b:8030"),
+                lds.polling_ds_builder(metric).base_uri("http://relay-a:8030"),
+            )
+            .fdv1_compatible_synchronizer(lds.fdv1_fallback_ds_builder(metric))
+            .build()
+        )
+```
+
+Leave `base_uri` off a source to keep it on Locust's `--host`, as the presets do. Setting it to `https://stream.launchdarkly.com` or `https://app.launchdarkly.com` would take that source straight to LaunchDarkly and off the relay you are measuring.
+
+Mobile users emulate the client-side FDv1 endpoints and are unaffected by this setting.
 
 For mobile users, override the class attributes that `LaunchDarklyMobileLocust` exposes, such as `send_events`, `sdk_key`, and `stream_uri`. For finer-grained changes, override `make_client()` to construct your own `MobileLDClient`.
 
@@ -101,6 +148,10 @@ LAUNCHDARKLY_HEARTBEAT_API_KEY=api-xxxx
 # https://app.launchdarkly.com. Set to https://app.launchdarkly.us
 # for federal, or to your EU region URL.
 LAUNCHDARKLY_API_BASE=https://app.launchdarkly.com
+
+# Optional: run server-side users in data saving mode (FDv2). One of
+# "default", "streaming", or "polling". Unset means FDv1.
+LAUNCHDARKLY_DATA_SYSTEM=default
 ```
 
 The relay's hostname comes from Locust's host setting, which you can supply as `--host`, `LOCUST_HOST`, or via the Locust UI when you start the swarm. Every endpoint the SDKs hit defaults to that host.
